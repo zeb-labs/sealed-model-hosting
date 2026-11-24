@@ -321,7 +321,9 @@ print("  staged %d files, %.2f GiB of weights" % (len(sib), sum(x["size"] for x 
   echo "Step 1 of 3: preparing the release"
   export MODEL SMH_RELEASING="$V"      # the watcher reads these to look at the right model and release
   guard builder "prepare the release" bash "$0" release "$MODEL" "$V" "$F" || true
-  if ! tail -3 "$(T_OF "$V")" | grep -q "FINAL STATUS: NEEDS_APPROVAL"; then echo "The release did not reach the approval step. Read $(T_OF "$V"), then run the same command again; it continues where it stopped."; exit 1; fi
+  if ! tail -3 "$(T_OF "$V")" | grep -q "FINAL STATUS: NEEDS_APPROVAL"; then if [ -n "${OWN_NAME:-}" ] && grep -q '"step\\*":\\*"lock\\*",\\*"state\\*":\\*"done' "$(T_OF "$V")"; then $A s3 rm --only-show-errors --recursive --exclude model-info.json "s3://$ART/deploy/models-in/$OWN_NAME/" || true; fi; echo "The release did not reach the approval step. Read $(T_OF "$V"), then run the same command again; it continues where it stopped."; exit 1; fi
+  # An own model that was staged again for a second try (its encryption was already done) must not stay in plain form.
+  if [ -n "${OWN_NAME:-}" ]; then $A s3 rm --only-show-errors --recursive --exclude model-info.json "s3://$ART/deploy/models-in/$OWN_NAME/" || true; fi
   say "Step 2 of 3: approval"
   if [ "${APPROVE:-}" = yes ]; then
     # Approved in advance, on one condition: every check of this exact build says PASS.

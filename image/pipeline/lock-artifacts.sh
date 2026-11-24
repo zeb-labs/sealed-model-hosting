@@ -20,7 +20,7 @@ cp "$SRC/image/m4/Dockerfile" "$SRC/image/m4/train.py" $D/build/
 echo "$PEFT" > $D/peft-version.txt
 
 echo "== 2. model $MODEL =="
-BUCKET=smh-poc-artifacts-111122223333; REGION=us-east-1; OWN=""; OFFLINE=""
+BUCKET=smh-poc-artifacts-111122223333; REGION=us-east-1; OWN=""; MODELARG="$MODEL"; MOUNT=""
 if [[ "$MODEL" == local/* ]]; then
   # The builder's OWN weights (from their disk, a network share or their own store), staged by `smh.sh ship <folder>`.
   OWN="deploy/models-in/${MODEL#local/}"; rm -rf $D/own; mkdir -p $D/own
@@ -28,13 +28,11 @@ if [[ "$MODEL" == local/* ]]; then
   [ -s $D/own/config.json ] || { echo "MODEL PROBLEM: the model folder has no config.json (it must be a Hugging Face style folder)"; exit 1; }
   ls $D/own/*.safetensors >/dev/null 2>&1 || { echo "MODEL PROBLEM: the model folder has no .safetensors weight files"; exit 1; }
   cp -rL $D/own/. $D/base/ && chmod -R a+rX $D/base
-  # The conversion step looks a model up BY NAME (it refuses a folder path, and with the offline switch on it turns
-  # the name into a path and refuses that too: both seen on 24 Nov). So the folder is put in the local Hugging Face
-  # cache under its name and the lookups stay on: the name is not on Hugging Face, the lookup fails, and the
-  # library falls back to the cached copy. Nothing is sent anywhere; the name is all that is asked for.
-  H=$(printf '%s' "$MODEL" | sha1sum | cut -c1-40); C="$D/hf/hub/models--${MODEL//\//--}"
-  rm -rf "$C"; mkdir -p "$C/refs" "$C/snapshots/$H"; cp -rL $D/own/. "$C/snapshots/$H/"; printf '%s' "$H" > "$C/refs/main"; chmod -R a+rX "$C"
-  OFFLINE="-e HF_HUB_DISABLE_TELEMETRY=1"
+  # vLLM loads a model from a folder path without trouble, but its tensorize step ends by asking Hugging Face for
+  # the model's small files by name (Read in code: serialize_extra_artifacts). image/m3/own/sitecustomize.py hands
+  # those files over from the folder instead. It is loaded by every Python process in this one container run.
+  chmod -R a+rX $D/own
+  MODELARG=/own; MOUNT="-v $D/own:/own:ro -v $SRC/image/m3/own:/smh-own:ro -e PYTHONPATH=/smh-own"
 else
   docker run --rm --entrypoint python3 -v $D/hf:/root/.cache/huggingface smh/model-server:latest \
     -c "from huggingface_hub import snapshot_download; snapshot_download('$MODEL')" > $D/download.log 2>&1 \
@@ -45,9 +43,9 @@ fi
 python3 "$SRC/image/m4/params.py" $D/base > $D/params.json
 
 echo "== 3. loading format (needs the GPU) =="
-docker run --rm --gpus all --ipc=host $OFFLINE -v $D/hf:/root/.cache/huggingface -v $D/out:/out \
-  -v "$SRC/image/m3/tensorize.py":/tensorize.py:ro --entrypoint python3 smh/model-server:latest /tensorize.py "$MODEL" > $D/tensorize.log 2>&1 \
-  || { echo "MODEL PROBLEM: the model could not be put in the loading format (vLLM could not load it):"; tail -6 $D/tensorize.log | cut -c1-600; exit 1; }
+docker run --rm --gpus all --ipc=host $MOUNT -v $D/hf:/root/.cache/huggingface -v $D/out:/out \
+  -v "$SRC/image/m3/tensorize.py":/tensorize.py:ro --entrypoint python3 smh/model-server:latest /tensorize.py "$MODELARG" > $D/tensorize.log 2>&1 \
+  || { echo "MODEL PROBLEM: the model could not be put in the loading format (vLLM could not load it):"; grep -E "Error|error:|Exception|File \"/usr/local/lib/python3.12/dist-packages/(vllm|huggingface_hub)" $D/tensorize.log | tail -14 | cut -c1-400; exit 1; }
 find $D/out -maxdepth 1 -type f ! -name model.tensors -exec cp {} $D/artifacts/ \;
 mv $D/out/model.tensors $D/plain-kept/model.tensors
 [ -s $D/artifacts/config.json ] || { echo "no config file next to the weights"; exit 1; }
@@ -55,7 +53,8 @@ mv $D/out/model.tensors $D/plain-kept/model.tensors
 echo "== 4. lock and upload to $PREFIX/ =="
 PREFIX="$PREFIX" MODEL="$MODEL" python3 "$SRC/image/pipeline/lock-and-upload.py" | grep -E "chunks|uploaded|DONE"
 # The plain copies are no longer needed on this machine.
-rm -rf $D/plain-kept $D/base $D/out $D/upload $D/own; if [ -n "$OWN" ]; then rm -rf "$D/hf/hub/models--${MODEL//\//--}"; fi
+rm -rf $D/plain-kept $D/base $D/out $D/upload $D/own
 # The builder's staged plain weights have done their job: the bucket goes back to holding ciphertext only.
-if [ -n "$OWN" ]; then aws s3 rm --only-show-errors --region $REGION --recursive "s3://$BUCKET/$OWN/"; echo "staged plain weights removed"; fi
+# The small description (file names and sizes, no weights) stays, so a later look at this release still finds the model.
+if [ -n "$OWN" ]; then aws s3 rm --only-show-errors --region $REGION --recursive --exclude model-info.json "s3://$BUCKET/$OWN/"; echo "staged plain weights removed"; fi
 echo "LOCK OK"

@@ -174,8 +174,10 @@ itself.
 | So the weights must be at most about 11 GiB for a 24 GiB GPU, or about 23 GiB for a 48 GiB GPU | The agent's machine table: `g5.xlarge`, `g6.xlarge`, `g5.2xlarge` (24 GiB), `g6e.xlarge` (48 GiB) | Read in code |
 | Fine-tuning expects layers named `q_proj` and `v_proj` | The job form names them | Run for one model only |
 
-**Only one model has been released and served: `Qwen/Qwen2.5-1.5B-Instruct`
-(3.1 GB).** Any other model is untested. A larger model may also need the
+**Two models have been released, served and fine-tuned:
+`Qwen/Qwen2.5-1.5B-Instruct` by name (3.1 GB), and a Llama-architecture
+model (SmolLM2-360M, 0.7 GB) from a folder, as a stand-in for a self-trained
+model.** Any other model is untested. A larger model may also need the
 GPU memory share in `image/m5/loader.json` (`--gpu-memory-utilization`,
 now `0.45`) raised; that has not been tried.
 

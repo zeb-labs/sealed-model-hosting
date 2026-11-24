@@ -89,6 +89,8 @@ WIDTH = 78      # keep the status line short enough for a narrow window
 def status_line(seen: dict, started: dict, now: float) -> str:
     """One line that says what is happening, for how long, and when the person is needed."""
     current = next((n for n in ORDER if seen.get(n) == "running"), None)
+    if current is None and not seen:
+        return "finishing: tying the keys to the image, about 5 min | nothing to type"      # the pin run starts with no status yet
     if current is None:
         left = sum(MINUTES[n] for n in ORDER if seen.get(n) != "done")
         return f"waiting for a machine | about {left} min to go | nothing to type"
@@ -103,7 +105,8 @@ if __name__ == "__main__":
         _test()
         t = {"lock": "running"}
         assert "min 3 of ~25" in status_line(t, {"lock": 1000.0}, 1000.0 + 150) and "nothing to type" in status_line(t, {"lock": 0.0}, 0.0)
-        assert "waiting for a machine" in status_line({}, {}, 0.0) and "about 65 min" in status_line({}, {}, 0.0)
+        assert "waiting for a machine" in status_line({"lock": "not_started"}, {}, 0.0) and "about 65 min" in status_line({"lock": "not_started"}, {}, 0.0)
+        assert "tying the keys" in status_line({}, {}, 0.0)
         assert all(len(status_line({n: "running"}, {n: 0.0}, 60.0 * 99)) + 2 <= WIDTH for n in ORDER)
         raise SystemExit(0)
     import threading

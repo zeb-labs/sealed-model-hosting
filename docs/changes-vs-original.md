@@ -55,13 +55,13 @@ not mention the web terminal.
 | Stable endpoint | An internal load balancer gives the endpoint a name that survives restarts. | Run |
 | Release agent | An AI agent (AWS AgentCore) runs the builder's release steps through fixed tools. It cannot write a key rule or read a secret. | Run |
 | Watcher agent | An AI agent that is called when any step fails, on either side. It investigates with read-only tools, applies a fix from a short fixed list, or tells the person exactly what to do, then the step runs again. | Run: a customer with no key access, a gated model, no free GPU machine (fixed by itself), a fine-tune over the limit. A missing AWS permission was tried on a made-up error only. |
-| Any open model, or the builder's own weights | `ship` takes a Hugging Face model by name, or a folder with the builder's own weights (disk, network share or S3). The own weights are staged, encrypted, and the staged copy is deleted. | Built. One open model has been released and served. The own-weights route is in its first real run. |
+| Any open model, or the builder's own weights | `ship` takes a Hugging Face model by name, or a folder with the builder's own weights (disk, network share or S3). The own weights are staged, encrypted, and the staged copy is deleted. | Run: an open model by name (Qwen2.5-1.5B) and the builder's own weights from a folder (a Llama-architecture model, SmolLM2-360M, standing in for a self-trained one) were each released, served and fine-tuned. |
 | Cost guard | Tracks spend, stops the project's machines nightly and near the budget. | Run |
 
 ## Not done, said plainly
 
 - **One AWS account.** Builder and customers are separate sets of resources in one account. The real wall needs a second account. Not tried.
-- **One model so far.** Only `Qwen/Qwen2.5-1.5B-Instruct` has been released and served end to end. The framework takes any public Hugging Face text model, or the builder's own weights from a folder, with safetensors weights that fit one GPU; a second model is in its first real run. Gated or private Hugging Face models cannot be fetched by name.
+- **Two small models so far**, of two architectures (Qwen2 and Llama), one by name and one from a folder. Both are small and run on one GPU; a large model, a multi-GPU model and other architectures are untested. Gated or private Hugging Face models cannot be fetched by name; ship their weights from a folder instead. An own model from an `s3://` location uses the same path as a folder but was not run.
 - **The build is not reproducible yet**, so a customer cannot rebuild the image and compare.
 - **Secure Boot uses test keys.** The endpoint certificate is self-signed per boot.
 - **Approval is automatic** when six checks pass. A person reading each release before approving is not shown.
