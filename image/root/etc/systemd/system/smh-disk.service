@@ -1,0 +1,15 @@
+[Unit]
+Description=smh-poc: encrypted scratch disk for containers (key only in RAM)
+DefaultDependencies=no
+After=local-fs.target systemd-udev-settle.service
+Before=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/smh-disk
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

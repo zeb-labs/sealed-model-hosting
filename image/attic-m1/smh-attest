@@ -1,0 +1,64 @@
+#!/bin/bash
+# smh-poc M1 boot service.
+# Proves this machine to KMS, receives the data key, and reports the result on
+# the console. It prints ONLY: OK or REFUSED, a decrypted test sentence, and PCR
+# values (which are public). The key never touches disk and is never printed.
+#
+# It asks for the key three times, to test the runtime PCR ("door lock"):
+#   1 boot    runtime PCR untouched
+#   2 open    runtime PCR extended once
+#   3 locked  runtime PCR extended a second time
+set -uo pipefail
+. /etc/smh/config
+umask 077
+export TPM2TOOLS_TCTI=device:/dev/tpmrm0
+RUNTIME_PCR=15
+W=/run/smh; mkdir -p "$W"; cd "$W"
+say() { echo "SMH $*"; }
+
+fetch() {  # retry: network and role credentials need a few seconds after boot
+    for _ in $(seq 1 30); do
+        aws s3 cp --only-show-errors --region "$REGION" "s3://$BUCKET/$PREFIX/$1" "$W/$1" 2>"$W/err" && return 0
+        sleep 5
+    done
+    say "FETCH_FAILED $1 $(tr '\n' ' ' <"$W/err" | cut -c1-200)"; return 1
+}
+
+pcrs() { tpm2_pcrread "sha384:4,7,12,$RUNTIME_PCR" 2>&1 | sed "s/^/SMH PCR[$1] /"; }
+
+extend() {  # extend the runtime PCR with SHA-384 of a fixed label
+    tpm2_pcrextend "$RUNTIME_PCR:sha384=$(printf '%s' "$1" | sha384sum | cut -d' ' -f1)" \
+        || say "EXTEND_FAILED $1"
+}
+
+release() {  # $1 = label
+    local priv doc out canary
+    priv=$(openssl genrsa 2048 2>/dev/null)                      # throwaway key, memory only
+    doc=$(nitro-tpm-attest --public-key <(openssl rsa -pubout -outform DER <<<"$priv" 2>/dev/null) | base64 -w0)
+    [ -n "$doc" ] || { say "KEY_RELEASE[$1]=ERROR no attestation document"; return; }
+    if ! out=$(aws kms decrypt --region "$REGION" --key-id "$KEY_ARN" \
+            --ciphertext-blob "fileb://$W/wrapped.key" \
+            --recipient "KeyEncryptionAlgorithm=RSAES_OAEP_SHA_256,AttestationDocument=$doc" \
+            --query CiphertextForRecipient --output text 2>&1); then
+        say "KEY_RELEASE[$1]=REFUSED $(grep -o '[A-Za-z]*Exception' <<<"$out" | head -1)"
+        return
+    fi
+    # KMS answer -> unwrap with the throwaway key -> data key (hex, in a pipe only) -> decrypt the test sentence
+    canary=$(base64 -d <<<"$out" \
+        | openssl cms -decrypt -inform DER -inkey <(echo "$priv") 2>/dev/null \
+        | od -An -tx1 | tr -d ' \n' \
+        | openssl enc -d -aes-256-cbc -pbkdf2 -in "$W/canary.enc" -pass stdin 2>/dev/null)
+    if [ -n "$canary" ]; then say "KEY_RELEASE[$1]=OK canary=\"$canary\""
+    else say "KEY_RELEASE[$1]=ERROR unwrap or decrypt failed"; fi
+}
+
+say "BOOT image=$(. /etc/os-release; echo "$PRETTY_NAME") kernel=$(uname -r)"
+fetch wrapped.key && fetch canary.enc || { say "DONE fetch failed"; exit 0; }
+
+pcrs boot;   release boot
+extend smh-poc-open
+pcrs open;   release open
+extend smh-poc-locked
+pcrs locked; release locked
+rm -rf "$W"
+say "DONE"

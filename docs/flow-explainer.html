@@ -1,0 +1,545 @@
+<title>Sealed Model Hosting Flow</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Manrope:wght@500;600&display=swap">
+<style>
+/* Layout: zeb two-tone. Dark charcoal sections for the overview and the results,
+   one beige section for the step-by-step walkthrough. Lime is the only accent,
+   and only on dark surfaces. Flat fills, no gradients. Single committed look. */
+:root{
+  --lime:#CEF79F; --lime-deep:#9FD16A; --charcoal:#222F30; --beige:#E7E8E1; --ink:#191919;
+  --d-text:#E7E8E1; --d-muted:rgba(231,232,225,.68); --d-surface:#2A383A; --d-border:rgba(231,232,225,.16);
+  --l-heading:#222F30; --l-text:#191919; --l-muted:rgba(25,25,25,.64); --l-card:#FFFFFF; --l-border:rgba(25,25,25,.14);
+  --font-display:Manrope, Arial, sans-serif; --font-sans:Inter, system-ui, -apple-system, sans-serif;
+  --mono:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--charcoal);color:var(--d-text);font-family:var(--font-sans);font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding-left:max(20px,env(safe-area-inset-left,0px));padding-right:max(20px,env(safe-area-inset-right,0px))}
+section{padding-block:clamp(48px,7vw,88px)}
+.dark{background:var(--charcoal);color:var(--d-text)}
+.light{background:var(--beige);color:var(--l-text)}
+h1,h2,h3{font-family:var(--font-display);font-weight:500;letter-spacing:-.02em;line-height:1.12;margin:0;text-wrap:balance}
+h1{font-size:clamp(32px,4.6vw,56px);max-width:18ch}
+h2{font-size:clamp(26px,3.2vw,38px)}
+h3{font-size:20px;line-height:1.25}
+.light h2,.light h3{color:var(--l-heading)}
+p{margin:0}
+.overline{font-size:11px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:var(--lime)}
+.light .overline{color:var(--charcoal)}
+.lede{font-size:clamp(16px,1.6vw,19px);color:var(--d-muted);max-width:62ch}
+.light .lede{color:var(--l-muted)}
+header.top{padding-block:28px 0}
+.logo svg{height:26px;width:auto;display:block}
+.hero{display:grid;gap:22px;padding-block:clamp(36px,6vw,72px) clamp(28px,4vw,48px)}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{border:1px solid var(--d-border);border-radius:100px;padding:5px 12px;font-size:13px;color:var(--d-text)}
+.head{display:grid;gap:12px;margin-bottom:28px}
+figure{margin:0;min-width:0}
+.scroll{overflow-x:auto;border-radius:20px;max-width:100%}
+.d1{background:var(--d-surface);border:1px solid var(--d-border);border-radius:20px;padding:14px}
+.d1{min-width:900px}
+.d1 svg{display:block;width:100%;height:auto}
+figcaption{font-size:14px;color:var(--d-muted);margin-top:12px;max-width:80ch}
+.light figcaption{color:var(--l-muted)}
+.legend{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:10px 28px;margin-top:22px;padding:0;list-style:none;counter-reset:n}
+.legend li{display:grid;grid-template-columns:26px 1fr;gap:10px;font-size:14.5px;color:var(--d-text)}
+.num{width:24px;height:24px;border-radius:100px;background:var(--lime);color:var(--charcoal);font-weight:600;font-size:12.5px;display:grid;place-items:center;font-variant-numeric:tabular-nums}
+.three{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin-top:36px}
+.three div{border-top:2px solid var(--lime-deep);padding-top:14px;display:grid;gap:6px}
+.three p{color:var(--d-muted);font-size:15px}
+
+/* walkthrough */
+.track{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:22px}
+@media (max-width:980px){.track{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:560px){.track{grid-template-columns:1fr}}
+.track .ph{border-top:2px solid var(--charcoal);padding-top:10px;display:grid;gap:6px;align-content:start;min-width:0}
+.track .ph b{font-family:var(--font-display);font-weight:600;font-size:15px;color:var(--l-heading);line-height:1.25}
+.track .ph small{font-size:12.5px;color:var(--l-muted);margin-bottom:4px}
+.track button{font:inherit;font-size:13.5px;text-align:left;display:grid;grid-template-columns:24px 1fr;gap:8px;align-items:center;border:1px solid transparent;background:transparent;color:var(--l-text);border-radius:10px;padding:6px 8px;min-height:36px;cursor:pointer}
+.track button i{font-style:normal;width:22px;height:22px;border-radius:100px;border:1px solid var(--l-border);display:grid;place-items:center;font-size:11.5px;font-weight:600;font-variant-numeric:tabular-nums}
+.track button.done i{background:var(--lime-deep);border-color:var(--lime-deep);color:var(--charcoal)}
+.track button[aria-current="step"]{background:var(--charcoal);color:var(--beige)}
+.track button[aria-current="step"] i{background:var(--lime);border-color:var(--lime);color:var(--charcoal)}
+.stage{display:grid;gap:16px;grid-template-columns:minmax(0,1fr)}
+.stage>*{min-width:0}
+.titlebar{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px}
+.titlebar h3{font-size:clamp(20px,2.2vw,26px);margin-right:auto}
+.tag{font-size:12.5px;font-weight:600;border-radius:100px;padding:4px 12px;background:var(--charcoal);color:var(--lime)}
+.what{font-size:17px;color:var(--l-text);max-width:80ch}
+.state{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+@media (max-width:820px){.state{grid-template-columns:1fr}}
+.state div{background:var(--l-card);border:1px solid var(--l-border);border-radius:12px;padding:12px 14px;display:grid;gap:4px;align-content:start;min-width:0}
+.state div.changed{border-color:var(--charcoal);border-width:2px;padding:11px 13px}
+.state span{font-size:11px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--l-muted)}
+.state p{font-size:14.5px;color:var(--l-text)}
+.state em{font-style:normal;font-size:11.5px;font-weight:600;color:var(--charcoal);border-bottom:2px solid var(--lime-deep);justify-self:start}
+.detail{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+@media (max-width:820px){.detail{grid-template-columns:1fr}}
+.d2{background:var(--l-card);border:1px solid var(--l-border);border-radius:20px;padding:10px}
+.d2{min-width:860px}
+.d2 svg{display:block;width:100%;height:auto;color:var(--charcoal)}
+.panel{background:var(--l-card);border:1px solid var(--l-border);border-radius:20px;padding:clamp(18px,2.2vw,28px);display:grid;gap:14px;min-width:0}
+.panel .who{font-size:13px;color:var(--l-muted)}
+.panel .who b{color:var(--l-heading);font-weight:600}
+.panel h4{font-family:var(--font-sans);font-size:11px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:var(--charcoal);margin:6px 0 0}
+.panel ul{margin:0;padding-left:18px;display:grid;gap:7px;font-size:14.5px;color:var(--l-text)}
+.panel code{font-family:var(--mono);font-size:12.5px;background:var(--beige);border-radius:6px;padding:1px 5px;overflow-wrap:anywhere}
+.proof{border-left:3px solid var(--lime-deep);padding:2px 0 2px 12px;font-size:14px;color:var(--l-text)}
+.nav{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:4px}
+.btn{font:inherit;font-weight:600;font-size:14.5px;border-radius:100px;padding:10px 20px;min-height:44px;cursor:pointer;border:1px solid var(--charcoal);display:inline-flex;align-items:center;gap:8px;transition:background 150ms ease}
+.btn.primary{background:var(--charcoal);color:var(--beige)}
+.btn.ghost{background:transparent;color:var(--charcoal)}
+.btn:disabled{opacity:.35;cursor:default}
+.btn svg{width:14px;height:14px}
+.count{font-size:13.5px;color:var(--l-muted);font-variant-numeric:tabular-nums;margin-left:auto}
+.arrows{list-style:none;margin:14px 0 0;padding:0;display:grid;gap:7px}
+.arrows li{display:grid;grid-template-columns:26px 1fr;gap:10px;font-size:14.5px;color:var(--l-text);align-items:start}
+.arrows .num{background:var(--charcoal);color:var(--lime)}
+:focus-visible{outline:2px solid var(--lime-deep);outline-offset:2px}
+.light :focus-visible{outline-color:var(--charcoal)}
+
+.gloss{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:26px 32px}
+.gcol{display:grid;gap:12px;align-content:start;min-width:0}
+.gcol h3{border-top:2px solid var(--lime-deep);padding-top:12px}
+.gcol dl{margin:0;display:grid;gap:12px}
+.gcol dt{font-weight:600;color:var(--lime);font-size:15px}
+.gcol dd{margin:2px 0 0;font-size:14.5px;color:var(--d-text)}
+.boxes{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px}
+.boxes li{background:var(--l-card);border:1px solid var(--l-border);border-radius:12px;padding:10px 14px;font-size:14.5px;color:var(--l-text)}
+.boxes b{display:block;color:var(--l-heading)}
+.sub{font-family:var(--font-sans);font-size:11px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:var(--charcoal);margin:6px 0 0}
+.fig{background:var(--l-card);border:1px solid var(--l-border);border-radius:20px;padding:clamp(16px,2vw,24px);display:grid;gap:14px;min-width:0}
+.fig p{font-size:14.5px;color:var(--l-text);max-width:85ch}
+.chunks{display:flex;flex-wrap:wrap;gap:6px;align-items:stretch}
+.chunks div{border:1px solid var(--charcoal);border-radius:8px;padding:8px 12px;font-size:13px;line-height:1.35;background:var(--beige);color:var(--l-text)}
+.chunks div b{display:block;color:var(--l-heading)}
+.chunks .hd{background:var(--charcoal);color:var(--beige)}
+.chunks .hd b{color:var(--lime)}
+.chunks .gap{border-style:dashed;background:transparent;display:grid;place-items:center}
+.tblwrap{overflow-x:auto}
+table.tbl{border-collapse:collapse;width:100%;min-width:520px;font-size:14px}
+.tbl th,.tbl td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--l-border);vertical-align:top}
+.tbl th{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--l-muted);font-weight:600}
+.tbl td:nth-child(2){font-variant-numeric:tabular-nums;white-space:nowrap}
+/* results */
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:22px}
+.card{background:var(--d-surface);border:1px solid var(--d-border);border-radius:20px;padding:clamp(18px,2.2vw,28px);display:grid;gap:12px;align-content:start;min-width:0}
+.card ul{margin:0;padding-left:18px;display:grid;gap:8px;font-size:15px;color:var(--d-text)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-bottom:26px}
+.stat{border-top:2px solid var(--lime-deep);padding-top:12px}
+.stat b{display:block;font-family:var(--font-display);font-weight:500;font-size:30px;letter-spacing:-.02em;color:var(--lime);font-variant-numeric:tabular-nums;line-height:1.1}
+.stat span{font-size:13.5px;color:var(--d-muted)}
+footer{padding-block:26px 34px;font-size:13px;color:var(--d-muted);border-top:1px solid var(--d-border)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="dark">
+  <header class="top wrap"><div class="logo" aria-label="zeb"><svg role="img" aria-label="zeb" xmlns="http://www.w3.org/2000/svg" xmlns:v="https://vecta.io/nano" viewBox="0 0 119 31" fill="none" preserveAspectRatio="xMidYMid meet"><path d="M50.65 29.755v-3.17l13.174-15.96.919 1.722H50.888v-4.01h17.859v3.17l-13.173 15.96-.998-1.722h14.53v4.01H50.65zm31.787.286c-2.373 0-4.448-.475-6.225-1.424s-3.152-2.251-4.126-3.913c-.974-1.655-1.46-3.541-1.46-5.653s.475-4.028 1.424-5.677c.949-1.643 2.258-2.933 3.925-3.87s3.572-1.406 5.707-1.406 3.937.456 5.568 1.363a9.83 9.83 0 0 1 3.846 3.852c.931 1.655 1.4 3.608 1.4 5.854l-.018.724-.061.761H74.6v-3.328h15.176l-1.959 1.041c.024-1.229-.225-2.312-.761-3.249a5.87 5.87 0 0 0-2.184-2.209c-.919-.535-1.984-.803-3.182-.803s-2.3.268-3.225.803c-.919.536-1.643 1.278-2.16 2.227-.523.949-.779 2.063-.779 3.347v.803c0 1.284.292 2.422.882 3.408.584.992 1.412 1.752 2.483 2.288 1.065.535 2.294.803 3.681.803 1.199 0 2.282-.189 3.243-.56s1.813-.961 2.562-1.765l2.683 3.091c-.961 1.126-2.166 1.984-3.62 2.586s-3.115.901-4.983.901l-.018.006zm13.855-.286V0h5.002v13.314l-.402 5.695.159 5.695v5.05h-4.765.006zm11.853.28c-1.813 0-3.431-.402-4.843-1.205-1.418-.803-2.531-2.014-3.341-3.626-.815-1.619-1.223-3.669-1.223-6.158s.42-4.57 1.26-6.176 1.977-2.799 3.401-3.59c1.43-.791 3.012-1.18 4.746-1.18 2.106 0 3.968.456 5.586 1.363s2.897 2.178 3.846 3.809 1.424 3.554 1.424 5.774-.475 4.144-1.424 5.775-2.227 2.909-3.846 3.827c-1.612.925-3.474 1.381-5.586 1.381v.006zm-.559-4.29c1.198 0 2.275-.268 3.225-.803s1.703-1.308 2.263-2.324.84-2.209.84-3.572-.28-2.586-.84-3.59-1.314-1.771-2.263-2.306-2.021-.803-3.225-.803-2.282.268-3.244.803-1.722 1.302-2.281 2.306-.84 2.197-.84 3.59.28 2.556.84 3.572 1.32 1.789 2.281 2.324 2.045.803 3.244.803z" fill="#fff"></path><path d="M16.91 0h.03a2.84 2.84 0 0 1 2.495 1.619l3.572 6.194 3.578-6.206.012-.024c.006-.012.006-.024.012-.024.006-.018.012-.024.018-.037s.006-.018.012-.024c.006-.018.012-.024.018-.03.006-.012.006-.018.012-.024.006-.012.012-.024.018-.03 0 0 .006-.012.012-.018.006-.012.006-.018.012-.024.006-.018.012-.024.018-.03.006-.012.006-.018.012-.024.006-.018.012-.024.018-.03.012-.012.012-.018.018-.024.006-.012.012-.024.018-.03 0 0 .006-.012.012-.018.006-.012.006-.018.012-.024.006-.018.018-.024.018-.03.012-.012.012-.018.018-.024.012-.012.024-.024.024-.03.012-.012.012-.018.018-.024l.024-.024c0-.006.012-.012.018-.018.006-.012.012-.018.018-.024.006-.018.018-.024.024-.03.006-.012.012-.018.018-.024.006-.018.018-.024.024-.03.006-.012.012-.018.018-.024l.024-.024.018-.018.024-.024.018-.018.018-.018.024-.024.018-.018c.012-.006.024-.012.03-.024l.018-.018c.012-.006.024-.012.03-.018.006 0 .018-.006.018-.012.012-.006.024-.012.03-.018.006 0 .018-.006.018-.012.018-.006.024-.012.037-.024 0 0 .012-.006.018-.012.024-.012.037-.024.055-.037.024-.012.043-.024.055-.037l.055-.037s.012-.006.018-.012c.012-.006.024-.012.037-.024.006 0 .012-.006.018-.012l.037-.018c.006 0 .012-.006.018-.012.018-.012.037-.018.061-.03.018-.012.037-.018.061-.03.018-.012.043-.018.061-.03s.043-.018.061-.03c.018-.006.043-.018.061-.024a2.46 2.46 0 0 1 .225-.079l.067-.018.067-.018a2.75 2.75 0 0 1 .456-.073h.073.037.037.037.037H16.77h.037L16.91 0z" fill="#717d7a"></path><path d="M33.722 26.846a2.87 2.87 0 0 0-.432-1.193L19.441 1.619A2.85 2.85 0 0 0 16.952 0h-.037-.037-.158c-1.059.061-1.959.7-2.397 1.606L.456 25.647a2.84 2.84 0 0 0-.444 1.272v.03L0 27.199v.024c.006.888.42 1.679 1.065 2.197.408.329.913.554 1.485.608h.024l.237.012h.024 28.057.024c.073 0 .146 0 .219-.012a2.84 2.84 0 0 0 1.546-.627 2.86 2.86 0 0 0 1.047-2.111l-.018-.45.012.006z" fill="#3b4240"></path><path d="M45.995 26.846a2.87 2.87 0 0 0-.432-1.193L31.708 1.619C31.27.7 30.357.055 29.292 0h-.03-.012-.03-.043-.037-.049-.037-.037-.037-.073c-.158.012-.31.037-.456.073-.024 0-.049.012-.067.018l-.067.018-.225.079c-.024.006-.043.018-.061.024s-.043.018-.061.03-.043.018-.061.03-.043.018-.061.03-.037.018-.061.03c-.006 0-.012.006-.018.012 0 0-.024.018-.037.024-.006 0-.012.006-.018.012-.012.006-.024.012-.037.024 0 0-.012.006-.018.012l-.055.037c-.018.012-.037.024-.049.037-.024.012-.037.024-.055.037-.006 0-.018.006-.024.012-.012.006-.018.012-.03.024-.006 0-.018.006-.018.012-.012.006-.024.012-.03.018-.006 0-.018.006-.018.012-.012.006-.024.012-.03.018-.006 0-.018.006-.018.012-.012.012-.024.018-.03.03-.006 0-.012.006-.018.012l-.03.03-.018.012s-.006.018-.012.018l-.024.024h-.006s-.006.018-.012.018l-.024.024-.018.018c-.006.018-.018.024-.024.03-.006.012-.012.018-.018.024-.006.018-.018.024-.024.03-.006.012-.012.018-.018.024-.006.018-.018.024-.024.03l-.024.024c-.006.012-.012.018-.018.024 0 0-.012.012-.012.018l-.012.012c-.006.012-.012.018-.018.024 0 .006-.012.012-.012.018-.006.012-.006.018-.012.024-.006.012-.012.024-.018.03 0 0-.006.012-.012.018-.006.012-.006.018-.012.024-.012.018-.018.024-.024.03-.006.012-.006.018-.012.024-.006.018-.012.024-.018.03-.006.012-.006.018-.012.024v.012l-.018.018s-.006.012-.012.018l-.006.024c-.012.018-.018.024-.024.03-.006.012-.006.018-.012.024-.006.018-.012.024-.018.037s-.006.024-.012.024c-.006.018-.012.024-.018.037L23.11 7.728l10.283 17.841a2.87 2.87 0 0 1 .432 1.193 2.78 2.78 0 0 1 .018.45c-.03.852-.426 1.606-1.047 2.111-.42.347-.943.572-1.533.627l-.231.012h-.012 12.255.024c.073 0 .146 0 .219-.012a2.84 2.84 0 0 0 1.545-.627 2.86 2.86 0 0 0 1.047-2.111l-.018-.45-.097.085z" fill="#d1ff79"></path><path d="M30.929 30.041c.073 0 .146 0 .219-.012a2.84 2.84 0 0 0 1.546-.627 2.86 2.86 0 0 0 1.047-2.111l-.018-.45a2.87 2.87 0 0 0-.432-1.193L23.007 7.807 12.723 25.641a2.84 2.84 0 0 0-.444 1.272v.03l-.012.249v.024c.006.888.42 1.679 1.065 2.197.408.329.913.554 1.485.609h.024l.237.012h.024 15.784.024l.018.006z" fill="#3d473c"></path></svg></div></header>
+  <div class="wrap hero">
+    <p class="overline">Secure model hosting - proof of concept</p>
+    <h1>A model the customer can run but never read</h1>
+    <p class="lede">A model builder ships its model into a customer's own AWS account. The customer's data never leaves that account, and the customer still cannot read or copy the model's weights. This page shows how that works, first in one picture, then step by step.</p>
+    <div class="chips"><span class="chip">Built on AWS NitroTPM attestation and KMS</span><span class="chip">Unmodified vLLM on one GPU</span><span class="chip">Tested on release 0.10.0</span></div>
+  </div>
+</div>
+
+<section class="dark" style="padding-top:8px">
+  <div class="wrap">
+    <div class="head">
+      <p class="overline">The idea in one picture</p>
+      <h2>The key follows the machine's proof of what it booted, not who asks</h2>
+    </div>
+    <figure>
+      <div class="scroll"><div class="d1">
+      <svg viewBox="0 0 1100 560" role="img" aria-label="Where each piece lives. Model builder account: build pipeline, an S3 bucket with the encrypted model, the KMS model key, the KMS lease key, and the builder operator. Customer account: the EC2 sealed machine in a private subnet, the customer's app, a CloudWatch log group, and the customer's S3 bucket, which also holds an encrypted copy of the model. The sealed machine pulls the encrypted model from the customer's bucket, proves its boot to the model key, receives the key for that boot, renews a lease, serves the app, and writes logs, adapters, and usage counts to the customer's side. The builder reads usage counts only.">
+<defs>
+<marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#CEF79F"/></marker>
+<marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#E7E8E1"/></marker>
+</defs>
+<g font-family="Inter, system-ui, sans-serif" font-size="13.5" fill="#E7E8E1">
+<rect x="20" y="30" width="390" height="500" rx="18" fill="#222F30" stroke="#E7E8E1" stroke-opacity=".35"/>
+<text x="46" y="60" font-size="11.5" font-weight="600" letter-spacing="1.8">MODEL BUILDER ACCOUNT</text>
+<rect x="600" y="30" width="480" height="500" rx="18" fill="#222F30" stroke="#E7E8E1" stroke-opacity=".35"/>
+<text x="1054" y="60" text-anchor="end" font-size="11.5" font-weight="600" letter-spacing="1.8">CUSTOMER ACCOUNT</text>
+<text x="1054" y="80" text-anchor="end" font-size="12" fill-opacity=".7">private subnet, no internet route</text>
+<rect x="70" y="76" width="300" height="56" rx="10" fill="#222F30" stroke="#E7E8E1" stroke-opacity=".3"/><text x="220.0" y="101.0" text-anchor="middle" font-weight="600">Build pipeline</text><text x="220.0" y="119.0" text-anchor="middle" font-size="12" fill-opacity=".7">run by the deployer agent, one approval</text>
+<rect x="70" y="172" width="300" height="56" rx="10" fill="#222F30" stroke="#E7E8E1" stroke-opacity=".3"/><text x="220.0" y="197.0" text-anchor="middle" font-weight="600">S3 bucket</text><text x="220.0" y="215.0" text-anchor="middle" font-size="12" fill-opacity=".7">the encrypted release</text>
+<rect x="70" y="268" width="300" height="56" rx="10" fill="#222F30" stroke="#CEF79F"/><text x="220.0" y="293.0" text-anchor="middle" font-weight="600">KMS model key</text><text x="220.0" y="311.0" text-anchor="middle" font-size="12" fill-opacity=".7">unlocks the model, once per boot</text>
+<rect x="70" y="364" width="300" height="56" rx="10" fill="#222F30" stroke="#CEF79F"/><text x="220.0" y="389.0" text-anchor="middle" font-weight="600">KMS lease key</text><text x="220.0" y="407.0" text-anchor="middle" font-size="12" fill-opacity=".7">the permit to keep running</text>
+<rect x="70" y="460" width="300" height="56" rx="10" fill="#222F30" stroke="#E7E8E1" stroke-opacity=".3"/><text x="220.0" y="485.0" text-anchor="middle" font-weight="600">Builder operator</text><text x="220.0" y="503.0" text-anchor="middle" font-size="12" fill-opacity=".7">reads usage counts, can cut off</text>
+<rect x="620" y="112" width="220" height="326" rx="14" fill="#2A383A" stroke="#CEF79F" stroke-width="1.6"/>
+<text x="636" y="136" font-size="11.5" font-weight="600" letter-spacing="1.6" fill="#CEF79F">EC2 SEALED MACHINE</text>
+<text x="636" y="154" font-size="12" fill-opacity=".75">no login, no shell</text>
+<rect x="636" y="174" width="188" height="52" rx="10" fill="#222F30" stroke="#E7E8E1" stroke-opacity=".3"/><text x="730.0" y="197.0" text-anchor="middle" font-weight="600">Model on the GPU</text><text x="730.0" y="215.0" text-anchor="middle" font-size="12" fill-opacity=".7">vLLM, plus adapters</text>
+<rect x="636" y="270" width="188" height="52" rx="10" fill="#222F30" stroke="#E7E8E1" stroke-opacity=".3"/><text x="730.0" y="293.0" text-anchor="middle" font-weight="600">Loader</text><text x="730.0" y="311.0" text-anchor="middle" font-size="12" fill-opacity=".7">proves, unlocks, locks</text>
+<rect x="636" y="366" width="188" height="52" rx="10" fill="#222F30" stroke="#E7E8E1" stroke-opacity=".3"/><text x="730.0" y="389.0" text-anchor="middle" font-weight="600">Lease and meter</text><text x="730.0" y="407.0" text-anchor="middle" font-size="12" fill-opacity=".7">plus the log shipper</text>
+<rect x="890" y="104" width="170" height="48" rx="10" fill="#222F30" stroke="#E7E8E1" stroke-opacity=".3"/><text x="975.0" y="125.0" text-anchor="middle" font-weight="600">S3 bucket</text><text x="975.0" y="142.0" text-anchor="middle" font-size="12" fill-opacity=".7">encrypted model copy</text>
+<rect x="890" y="172" width="170" height="56" rx="10" fill="#222F30" stroke="#E7E8E1" stroke-opacity=".3"/><text x="975.0" y="197.0" text-anchor="middle" font-weight="600">Customer's app</text><text x="975.0" y="215.0" text-anchor="middle" font-size="12" fill-opacity=".7">HTTPS, with an API key</text>
+<rect x="890" y="268" width="170" height="56" rx="10" fill="#222F30" stroke="#E7E8E1" stroke-opacity=".3"/><text x="975.0" y="293.0" text-anchor="middle" font-weight="600">CloudWatch logs</text><text x="975.0" y="311.0" text-anchor="middle" font-size="12" fill-opacity=".7">the machine's log</text>
+<rect x="890" y="364" width="170" height="56" rx="10" fill="#222F30" stroke="#E7E8E1" stroke-opacity=".3"/><text x="975.0" y="389.0" text-anchor="middle" font-weight="600">S3 bucket</text><text x="975.0" y="407.0" text-anchor="middle" font-size="12" fill-opacity=".7">jobs, adapters, usage</text>
+<g fill="none" stroke="#E7E8E1" stroke-width="1.7">
+<line x1="220" y1="132" x2="220" y2="170" marker-end="url(#a2)"/>
+<path d="M370 200H560V92H975V102" marker-end="url(#a2)"/>
+<line x1="888" y1="136" x2="842" y2="136" marker-end="url(#a2)"/>
+<line x1="826" y1="200" x2="888" y2="200" marker-start="url(#a2)" marker-end="url(#a2)"/>
+<line x1="840" y1="296" x2="888" y2="296" marker-end="url(#a2)"/>
+<line x1="840" y1="392" x2="888" y2="392" marker-end="url(#a2)"/>
+<path d="M975 420V488H372" marker-end="url(#a2)"/>
+</g>
+<g fill="none" stroke="#CEF79F" stroke-width="1.9">
+<path d="M70 104H46V392H68" marker-end="url(#a1)"/>
+<path d="M46 296H68" marker-end="url(#a1)"/>
+<line x1="634" y1="287" x2="372" y2="287" marker-end="url(#a1)"/>
+<line x1="370" y1="305" x2="634" y2="305" marker-end="url(#a1)"/>
+<line x1="372" y1="392" x2="634" y2="392" marker-start="url(#a1)" marker-end="url(#a1)"/>
+<line x1="220" y1="460" x2="220" y2="422" stroke-dasharray="5 5" marker-end="url(#a1)"/>
+</g>
+<g font-size="12.5" text-anchor="middle">
+<text x="465" y="190">encrypted release, copied</text>
+<text x="515" y="277">proof of what it booted</text>
+<text x="515" y="323">key, for this boot only</text>
+<text x="515" y="382">lease renewal</text>
+<text x="680" y="478">usage counts, read-only</text>
+<text x="300" y="445" font-size="12" fill-opacity=".8">disable to cut off</text>
+</g>
+<circle cx="240" cy="152" r="10.5" fill="#CEF79F"/><text x="240" y="156" text-anchor="middle" fill="#222F30" font-weight="700" font-size="11.5">1</text><circle cx="420" cy="200" r="10.5" fill="#CEF79F"/><text x="420" y="204" text-anchor="middle" fill="#222F30" font-weight="700" font-size="11.5">2</text><circle cx="46" cy="200" r="10.5" fill="#CEF79F"/><text x="46" y="204" text-anchor="middle" fill="#222F30" font-weight="700" font-size="11.5">3</text><circle cx="588" cy="287" r="10.5" fill="#CEF79F"/><text x="588" y="291" text-anchor="middle" fill="#222F30" font-weight="700" font-size="11.5">4</text><circle cx="420" cy="305" r="10.5" fill="#CEF79F"/><text x="420" y="309" text-anchor="middle" fill="#222F30" font-weight="700" font-size="11.5">5</text><circle cx="865" cy="136" r="10.5" fill="#CEF79F"/><text x="865" y="140" text-anchor="middle" fill="#222F30" font-weight="700" font-size="11.5">6</text><circle cx="857" cy="200" r="10.5" fill="#CEF79F"/><text x="857" y="204" text-anchor="middle" fill="#222F30" font-weight="700" font-size="11.5">7</text><circle cx="864" cy="296" r="10.5" fill="#CEF79F"/><text x="864" y="300" text-anchor="middle" fill="#222F30" font-weight="700" font-size="11.5">8</text><circle cx="864" cy="392" r="10.5" fill="#CEF79F"/><text x="864" y="396" text-anchor="middle" fill="#222F30" font-weight="700" font-size="11.5">8</text><circle cx="520" cy="488" r="10.5" fill="#CEF79F"/><text x="520" y="492" text-anchor="middle" fill="#222F30" font-weight="700" font-size="11.5">9</text><circle cx="420" cy="392" r="10.5" fill="#CEF79F"/><text x="420" y="396" text-anchor="middle" fill="#222F30" font-weight="700" font-size="11.5">10</text>
+</g>
+</svg>
+      </div></div>
+      <figcaption>Each box sits in the account that owns it. The keys never leave the builder's account. The machine, the app, the logs, the adapters, and an encrypted copy of the model are in the customer's. The copy is useless without the key. Lime lines are the key path, and the dashed line is the builder switching the lease off. In the proof of concept both sides are two separate sets of resources inside one AWS account.</figcaption>
+    </figure>
+    <ol class="legend">
+      <li><span class="num">1</span><span>The builder cuts the model into pieces, encrypts each piece, and stores them in an S3 bucket (Amazon's file storage) in the builder's account. The bucket holds unreadable data only.</span></li>
+      <li><span class="num">2</span><span>The encrypted release is copied once into the customer's own bucket. It is still unreadable there, and the machine no longer depends on the builder's bucket to start.</span></li>
+      <li><span class="num">3</span><span>The builder keeps two master keys in AWS KMS, Amazon's key service. The model key is the only thing that can unlock the model. The lease key is a permit the machine must renew to keep running. The pipeline writes a rule on both: release only to a machine that booted this exact image.</span></li>
+      <li><span class="num">4</span><span>At boot, the sealed machine in the customer's account sends KMS a signed proof of what it booted. The proof comes from AWS hardware, so the machine cannot fake it.</span></li>
+      <li><span class="num">5</span><span>KMS checks the proof against the rule and returns the model's key, packaged so that only this one boot can open it. Then the machine locks itself so the key cannot be asked for again.</span></li>
+      <li><span class="num">6</span><span>The encrypted pieces stream from the customer's bucket to the GPU. Each one is checked against fingerprints inside the image and decrypted in memory. No readable copy is written to disk.</span></li>
+      <li><span class="num">7</span><span>The customer's app asks questions over the customer's private network, on HTTPS, with an API key the customer manages.</span></li>
+      <li><span class="num">8</span><span>The machine's logs go to the customer's log store (CloudWatch). Fine-tuned add-ons and usage records go to the customer's S3 bucket.</span></li>
+      <li><span class="num">9</span><span>The builder may read the usage records, which are counts only, and nothing else on the customer's side.</span></li>
+      <li><span class="num">10</span><span>Every minute the machine renews its lease with KMS. If the builder disables the lease key, renewal fails and the machine switches itself off within about two minutes.</span></li>
+    </ol>
+    <div class="three">
+      <div><h3>The builder keeps</h3><p>The weights, the build, usage counts, and the ability to switch access off.</p></div>
+      <div><h3>The customer keeps</h3><p>Their data, their logs, their adapters, and full control of the account the machine runs in.</p></div>
+      <div><h3>Nobody gets</h3><p>A shell on the sealed machine. Not the customer, and not the builder.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="dark" id="words" style="padding-top:8px">
+  <div class="wrap">
+    <div class="head">
+      <p class="overline">Words used on this page</p>
+      <h2>Every term, in plain words</h2>
+      <p class="lede">Nothing below assumes you know AWS or machine learning. Each term is used the same way in both diagrams.</p>
+    </div>
+    <div class="gloss">
+      <div class="gcol"><h3>Keys and proof</h3><dl><dt>AWS KMS</dt><dd>Amazon's key service. It holds master keys that never leave it. You can only ask it to do something with a key, and it checks a written rule (the key policy) before it does.</dd><dt>Model key</dt><dd>A master key in KMS, in the builder's account. It is the only thing that can unwrap the model's data key. Its rule: release only to our exact machine image, and only once per boot.</dd><dt>Data key</dt><dd>The 256-bit key that actually encrypts the model. KMS creates it. It exists in readable form only for a moment: in the build pipeline while encrypting, and in the sealed machine's memory while loading.</dd><dt>Wrapped key</dt><dd>The data key, encrypted by the model key. A 184-byte file stored next to the model, in both buckets. Useless to anyone who cannot get KMS to unwrap it.</dd><dt>Lease and lease key</dt><dd>A lease is a short permit to keep serving. The lease key is a second master key in KMS used only for that: every minute the machine must get KMS to use it. If the builder disables the key, the permit runs out and the machine stops.</dd><dt>Attestation document</dt><dd>A proof of what a machine booted, signed by AWS hardware. It lists the machine's boot fingerprints. KMS reads it and compares it with the key's rule.</dd><dt>Measurement (PCR)</dt><dd>A fingerprint of something that ran during boot, recorded in the machine's TPM. A record can be added to but never rewritten. We use four: the boot file, the Secure Boot state, extra boot settings, and one of our own.</dd><dt>Open state, locked state</dt><dd>Two values of our own fingerprint. Open: the machine has checked its containers and may ask for the model key. Locked: it has asked once, and can never ask again on this boot. The lease key works only in the locked state.</dd></dl></div>
+      <div class="gcol"><h3>The machine</h3><dl><dt>Sealed image</dt><dd>The disk image the machine boots from. It has no login of any kind, its disk is read-only and verified block by block, and it does one fixed job at boot.</dd><dt>Secure Boot</dt><dd>A firmware check that refuses to start a boot file that is not signed with the builder's key.</dd><dt>NitroTPM</dt><dd>A security component AWS gives each machine. It stores the boot fingerprints and produces the signed proof.</dd><dt>Loader</dt><dd>The first program of ours that runs. It checks the containers, proves the boot to KMS, receives the key once, and locks.</dd><dt>Decrypting proxy</dt><dd>A small program inside the machine. It fetches encrypted pieces of the model, checks and decrypts each one in memory, and hands them to the model server.</dd><dt>Encrypted local disk</dt><dd>A fast disk inside the machine used for the large container and for training. It is encrypted with a random key that exists only in memory, so its contents are unreadable after power-off.</dd><dt>Front gate</dt><dd>A small web server at the machine's only open port (HTTPS, port 443). It asks for an API key and lets the customer's app reach four addresses of the model server and nothing else.</dd><dt>API key</dt><dd>A password for the endpoint. The customer writes their keys in a file in their own bucket; the machine reads it every 30 seconds. No valid key, no answer.</dd><dt>Container firewall</dt><dd>Rules set at boot that stop the model server's container from opening any connection out. It can only fetch the weights from the proxy on the same machine.</dd><dt>Launch tags</dt><dd>Labels the customer's template puts on the machine. Three of them name the customer's bucket, key, and log group, so one image can serve many customers. They are not trusted and open nothing.</dd><dt>Private subnet, endpoint</dt><dd>The machine sits in a network with no route to the internet. It can reach exactly three AWS services through private doors called endpoints: storage, KMS, and logs.</dd></dl></div>
+      <div class="gcol"><h3>The model</h3><dl><dt>Weights</dt><dd>The numbers that are the model. They are what the builder must protect.</dd><dt>vLLM</dt><dd>The open-source program that serves the model on the GPU. We run it unmodified.</dd><dt>Tensorizer format</dt><dd>A way of laying out the weights in a file so they can be read piece by piece straight into GPU memory.</dd><dt>Chunk</dt><dd>One 8 MiB piece of an encrypted file. Each chunk is encrypted separately and carries its own tamper check.</dd><dt>Tamper check</dt><dd>A 16-byte code on every chunk (AES-256-GCM). If a chunk is changed, swapped, dropped, or cut short, the check fails and the machine refuses it.</dd><dt>Fine-tuning, adapter</dt><dd>Fine-tuning teaches the model from the customer's examples. The result is a small add-on file called an adapter (LoRA). The base weights do not change.</dd></dl></div>
+      <div class="gcol"><h3>Running and control</h3><dl><dt>Deployer agent</dt><dd>An AI agent that runs the builder's release steps in order by calling fixed tools. It cannot approve a release, write a key rule, or read a secret.</dd><dt>Onboarding</dt><dd>The builder adds one statement to both key rules for one customer's machine role. The measurements are still required. Removing the statement cuts that customer off.</dd><dt>Approval</dt><dd>A record that a human approved one exact build. The keys cannot be tied to an image without it.</dd><dt>Job runner, trainer</dt><dd>The job runner picks up fine-tuning jobs from the customer's bucket and checks the form. The trainer does the training with no network and no credentials.</dd><dt>Usage meter, usage record</dt><dd>The meter counts requests and tokens. Every two minutes it writes a small record of those counts, with a seal, into the customer's bucket.</dd><dt>Seal</dt><dd>A keyed fingerprint (HMAC) on each usage record. The builder can tell if a record was changed; missing numbers in the sequence show if one was removed.</dd><dt>Log shipper</dt><dd>Sends the machine's own log to the customer's log store. It never sends what the trainer prints.</dd><dt>Cut-off</dt><dd>The builder disables the keys. The machine's next lease renewals fail, it stops serving, and it powers off.</dd></dl></div>
+    </div>
+  </div>
+</section>
+
+<section class="light" id="steps">
+  <div class="wrap">
+    <div class="head">
+      <p class="overline">Step by step</p>
+      <h2>From a model file to a running, metered, revocable service</h2>
+      <p class="lede">Seventeen steps, end to end. The builder does the first six once per release. The customer side takes two. The machine does the rest by itself at every boot. For each step you see who talks to whom, what each highlighted box is, where the model and its key are at that moment, why the step exists, and what we ran to show it works.</p>
+    </div>
+    <div class="track" id="track" role="group" aria-label="All steps"></div>
+    <div class="stage" aria-live="polite">
+      <div class="titlebar"><h3 id="p-title"></h3><span class="tag" id="p-by"></span>
+        <div class="nav">
+          <button class="btn ghost" id="prev" type="button"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M9 2L4 7l5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Back</button>
+          <button class="btn primary" id="next" type="button">Next<svg viewBox="0 0 14 14" aria-hidden="true"><path d="M5 2l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        </div>
+      </div>
+      <p class="what" id="p-what"></p>
+      <figure>
+        <div class="scroll"><div class="d2"><svg id="d2" viewBox="0 0 960 574" role="img" aria-label="Step diagram"></svg></div></div>
+        <ol class="arrows" id="arrows"></ol>
+        <p class="sub">What the highlighted boxes are</p>
+        <ul class="boxes" id="p-boxes"></ul>
+        <figcaption id="cap"></figcaption>
+      </figure>
+      <div class="fig" id="p-fig" hidden></div>
+      <div class="state" aria-label="Where things are after this step">
+        <div id="st-m"><span>The model's weights</span><p></p></div>
+        <div id="st-k"><span>The data key</span><p></p></div>
+        <div id="st-s"><span>The sealed machine</span><p></p></div>
+      </div>
+      <div class="detail">
+        <div class="panel">
+          <h4>Why this step exists</h4>
+          <p id="p-why"></p>
+          <h4>How we know it works</h4>
+          <p class="proof" id="p-proof"></p>
+        </div>
+        <div class="panel">
+          <h4>Technical detail</h4>
+          <ul id="p-tech"></ul>
+        </div>
+      </div>
+      <div class="nav"><button class="btn ghost" id="prev2" type="button">Back</button><button class="btn primary" id="next2" type="button">Next step</button><span class="count" id="count"></span></div>
+    </div>
+  </div>
+</section>
+
+<section class="dark">
+  <div class="wrap">
+    <div class="head">
+      <p class="overline">Where it stands</p>
+      <h2>What we ran, and what we did not show</h2>
+    </div>
+    <div class="stats">
+      <div class="stat"><b>32 of 33</b><span>attack-suite tests pass on release 0.10.0; the other is the known open one</span></div>
+      <div class="stat"><b>80 to 120 s</b><span>from keys disabled to answers stopped</span></div>
+      <div class="stat"><b>80 s</b><span>to fine-tune a small adapter while serving</span></div>
+      <div class="stat"><b>12 min</b><span>from boot to first answer</span></div>
+      <div class="stat"><b>3</b><span>human commands for a release run by the agent</span></div>
+      <div class="stat"><b>1 stack</b><span>brings up the whole customer side, with an endpoint name that stays the same</span></div>
+    </div>
+    <div class="cols">
+      <div class="card">
+        <h3>Shown by running it</h3>
+        <ul>
+          <li>The key goes only to the exact image: seven attack boots ended with no key or no model, and our own admin user was refused the key.</li>
+          <li>No way in: no login prompt, one open port (HTTPS), and no answer without the customer's API key. Given a role and network path for AWS remote management, the machine still never registered.</li><li>The machine loaded the model from the customer's own bucket. The model server's container could open no outbound connection, and serving and fine-tuning still worked.</li><li>Asked to hibernate (save memory to disk) while holding the key, the machine wrote no memory image.</li><li>One-click setup: one stack brought up a second, separate customer on the same image. Its logs, usage records, and adapters went to its own bucket and log group. One command fine-tuned and served an adapter. After a restart the same endpoint name answered.</li><li>Removing one customer from the key rules stopped that customer's machine within four minutes.</li><li>Two commands do the whole job: one for the builder (release, approval, keys, customer access; about an hour, one question at the start) and one for the customer (network, machine, API key, test call; about 25 minutes). Both were run on real machines.</li>
+          <li>Plain weights never touch the system disk: after serving and training it was byte-for-byte the released image.</li>
+          <li>Network logs show traffic only to storage, KMS, and the customer's log.</li>
+          <li>Fine-tuning takes a form and data, never code; bad forms are refused.</li>
+          <li>The builder's role can read usage counts and nothing else on the customer's side.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Not shown, said plainly</h3>
+        <ul>
+          <li>One AWS account. Builder and customers are separate sets of resources in it. The real wall needs a second account.</li><li>The one-click template was run inside an existing network, because the test account is at its limit of five networks. Its normal path, creating its own network, was not run. The launch link was produced, not clicked.</li>
+          <li>Host memory is not flat: it grows by about 3 parts in 10 of the model's size, and loading needs about twice the model's size in GPU memory.</li>
+          <li>The build is not reproducible yet, so a customer cannot rebuild and compare.</li>
+          <li>What many adapters reveal about the base weights is not measured.</li>
+          <li>A person does not read each release before it is approved. The builder agrees once at the start, and the release is approved only when its six automatic checks pass. A stricter mode, where a person types the approval after reading the summary, exists; it has not been shown with a person. Approver credentials must be separate from all automation.</li>
+          <li>Secure Boot uses test keys. One small open model on one GPU.</li><li>The endpoint's certificate is made fresh at each boot and is self-signed; the app pins its fingerprint from the log. There is no stable endpoint name yet.</li><li>A bug in the model server could still be used from inside its container; the firewall closes only the network way out.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+<footer class="dark"><div class="wrap">&copy; 2026 zeb. Proof of concept. Figures are from runs on November 20 to 24, 2026.</div></footer>
+
+<script>
+const PHASES = [["Builder prepares a release", "once per model version"], ["Customer installs", "once, in their own account"], ["Every boot", "automatic, about 12 minutes"], ["While it runs", "continuous"]];
+const COL = {b1:34, b2:214, s1:412, s2:572, c:780}, ROW = [110, 200, 290, 380, 470], W = 140, H = 46;
+// id: [column, row, line 1, line 2]. Every box sits in the account that owns it.
+const N = {
+  pipeline:["b1",0,"Build pipeline","prepares and builds"], agent:["b1",1,"Deployer agent","and human approver"], operator:["b1",4,"Builder operator","usage, cut-off"],
+  bbucket:["b2",0,"S3 bucket","encrypted model"], mkey:["b2",1,"Model key in KMS","unlocks the model"], lkey:["b2",3,"Lease key in KMS","permit to keep going"],
+  tpm:["s1",0,"Secure Boot, TPM","check, record boot"], loader:["s1",1,"Loader","unlocks, then locks"], disk:["s1",2,"Decrypting proxy","and encrypted disk"], lease:["s1",3,"Lease service","renews every minute"], meter:["s1",4,"Usage meter","counts requests"],
+  jobs:["s2",1,"Job runner","runs fine-tuning"], vllm:["s2",2,"vLLM on the GPU","serves the model"], gate:["s2",3,"Front gate","four addresses only"], logs:["s2",4,"Log shipper","sends the log"],
+  admin:["c",0,"Customer admin","installs, launches"], cjobs:["c",1,"S3 bucket","model copy, jobs"], app:["c",2,"Customer's app","asks questions"], clog:["c",3,"CloudWatch logs","the machine's log"], usage:["c",4,"S3 bucket","usage records"]
+};
+const ABOUT = {
+  pipeline:"The builder's automated build. It prepares the model files, encrypts them, builds the machine image, and computes the image's fingerprints.",
+  agent:"An AI agent that runs the release steps in order by calling fixed tools, and the human who must approve the release.",
+  operator:"The person at the builder who reads usage counts and can switch a customer's access off.",
+  bbucket:"Amazon S3 file storage in the builder's account. It holds the model in encrypted form only, plus the wrapped key.",
+  mkey:"A master key held inside AWS KMS, Amazon's key service, in the builder's account. It never leaves KMS. It is the only thing that can unwrap the model's data key.",
+  lkey:"A second master key in KMS. It does not protect the model. The machine must get KMS to use it every minute, like renewing a permit to keep running.",
+  tpm:"Secure Boot refuses a boot file the builder did not sign. The NitroTPM records a fingerprint of everything that boots and can sign a proof of it.",
+  loader:"The first program of ours that runs on the machine. It checks the containers, asks KMS for the key once, then locks the machine against asking again.",
+  disk:"The proxy decrypts the model piece by piece in memory for the model server. The local disk is encrypted with a key that exists only in memory.",
+  lease:"A small program that renews the lease with KMS every minute, and switches the machine off if renewal is refused.",
+  meter:"Counts requests and tokens, and writes them every two minutes as a small sealed record.",
+  jobs:"Picks up fine-tuning jobs from the customer's bucket, checks the form, and runs the trainer with no network.",
+  vllm:"The open-source program that serves the model. It runs on the GPU, unmodified, with no AWS credentials.",
+  gate:"A small web server at the machine's only open port (HTTPS, port 443). It asks for one of the customer's API keys and passes on four addresses of the model server and nothing else.",
+  logs:"Sends the machine's own log to the customer's log store. It never sends what the trainer prints.",
+  admin:"The person at the customer who installs the stack and launches the machine in their own account.",
+  cjobs:"S3 storage in the customer's account. It holds the encrypted copy of the release, the customer's API keys, job forms, training data, and finished adapters.",
+  app:"The customer's own software. It asks the model questions over the private network.",
+  clog:"Amazon CloudWatch Logs in the customer's account. It receives the machine's log.",
+  usage:"A folder in the customer's bucket where usage records land. It is the one place on the customer's side the builder may read."
+};
+const box = id => { const n = N[id]; return [COL[n[0]], ROW[n[1]] - H / 2, W, H]; };
+const STEPS = [
+ {by:"Builder",p:0,t:"Prepare the model files",who:"Model builder",on:["pipeline"],e:[],
+  why:"After encryption nobody can reshape the files, so they must first be in exactly the form the machine will load.",
+  m:"Readable, on the builder's temporary build machine only.",k:"Does not exist yet.",st:"Does not exist yet.",
+  what:"The builder starts from the model as it was trained and produces the three things the sealed machine will need: the weights in a form that can be streamed to a GPU, a second copy for fine-tuning, and the model-server container.",
+  tech:["The weights are saved in the tensorizer format: a file layout that vLLM can read piece by piece straight into GPU memory. This one step needs a temporary GPU machine in the builder's account.","A second copy stays in the standard format, because the training library cannot read the first one.","The model server is the official vLLM image, pinned to one exact version by its fingerprint, plus the fine-tuning library and the builder's trainer script. It is about 26 GB.","The pipeline also counts the model's layer sizes. That fixes how large a customer's adapter is allowed to be."],
+  proof:"Run: the agent did this step for five releases, in about 25 minutes each including the encryption that follows."},
+ {by:"Builder",p:0,t:"Get a data key from KMS",who:"Model builder and AWS KMS",on:["pipeline","mkey"],
+  e:[["pipeline","mkey","asks for a new data key",-8],["mkey","pipeline","returns it twice: readable, and wrapped",-8]],
+  why:"From here on, whoever can get KMS to unwrap one 184-byte file can read the model, and nobody else can. Steps 6 and 11 decide who that is.",
+  m:"Readable, on the builder's temporary build machine only.",k:"Readable copy in the pipeline's memory. Wrapped copy ready to store.",st:"Does not exist yet.",
+  what:"The builder does not encrypt the model with the KMS key itself. A KMS key never leaves KMS and only handles small data. Instead KMS creates a fresh 256-bit data key and hands it back in two forms.",
+  tech:["The call is <code>kms:GenerateDataKey</code> on the model key, asking for an AES-256 key.","Readable form: used to encrypt in the next step, kept only in the pipeline's memory.","Wrapped form: the same key encrypted by the model key. 184 bytes. Safe to store anywhere, because only KMS can unwrap it.","This pattern is called envelope encryption: a small key locks the data, and a master key locks the small key.","The data key is not used directly. Two working keys are derived from it (HKDF-SHA256), one for the weights and one for the containers, so the two can never be confused."],
+  proof:"Run: our own admin user asked KMS to unwrap the stored key and was refused. The key's rule gives decryption to the sealed machine only.",
+  fig:'<p class="sub">A closer look: two keys, two jobs</p><div class="chunks"><div class="hd"><b>Model key</b>master key, stays inside KMS<br>locks the data key</div><div><b>Data key</b>256 bits, made by KMS<br>locks the model</div><div><b>Wrapped key</b>the data key, locked by the model key<br>184 bytes, stored beside the model</div></div><p>To read the model you need the data key. To get the data key you must get KMS to unwrap the wrapped key. KMS decides by its rule, and the rule names one exact machine image.</p>'},
+ {by:"Builder",p:0,t:"Encrypt in chunks and store",who:"Model builder",on:["pipeline","bbucket"],
+  e:[["pipeline","bbucket","the encrypted files and the wrapped key"]],
+  why:"Chunks let the machine stream the model to the GPU without ever holding the whole file, and let it fetch any part on request. The check on every chunk means a changed, swapped, dropped, or cut-short piece is refused.",
+  m:"Encrypted, in the S3 bucket in the builder's account.",k:"Wrapped copy stored next to the model. The readable copy lived only in the pipeline's memory and is gone.",st:"Does not exist yet.",
+  what:"Each file is cut into 8 MiB pieces. Every piece is encrypted separately and gets its own tamper check. The results go into an S3 bucket in the builder's account, and the readable data key is thrown away.",
+  tech:["Cipher: AES-256-GCM, one operation per chunk. It encrypts the chunk and adds a 16-byte tamper check.","Each chunk's position is part of its encryption: the nonce is a random 7-byte prefix, the chunk number, and a flag on the last chunk. So chunks cannot be reordered, and a file cannot be cut short unnoticed.","A 17-byte header (format name, chunk size, the random prefix) is bound into every chunk's check.","The demo model: 3,562,865,424 bytes of weights became 425 chunks. The stored file is 6,817 bytes larger: the header plus 425 checks.","The readable files on the build machine are deleted after the upload."],
+  proof:"Run: every stored object starts with our encrypted-file header (suite test S8). With one byte changed in the stored weights, the model never serves (suite test B6).",
+  fig:'<p class="sub">A closer look: one encrypted file</p><div class="chunks"><div class="hd"><b>Header</b>17 bytes<br>format, chunk size, prefix</div><div><b>Chunk 0</b>8 MiB encrypted<br>+ 16-byte check</div><div><b>Chunk 1</b>8 MiB encrypted<br>+ 16-byte check</div><div class="gap">422 more</div><div><b>Chunk 424</b>the rest, flagged last<br>+ 16-byte check</div></div><p class="sub">What the builder\'s bucket holds for one release</p><div class="tblwrap"><table class="tbl"><thead><tr><th>Object</th><th>Size</th><th>What it is</th></tr></thead><tbody><tr><td>model.tensors.sbox</td><td>3.56 GB</td><td>The weights, in the streaming format, in 425 encrypted chunks</td></tr><tr><td>model-hf.sbox</td><td>3.10 GB</td><td>The second copy of the weights, used only for fine-tuning</td></tr><tr><td>model-server.sbox</td><td>8.37 GB</td><td>The model-server container (vLLM and the trainer), compressed and encrypted</td></tr><tr><td>model-config.sbox</td><td>11.5 MB</td><td>The model\'s settings and tokenizer files</td></tr><tr><td>wrapped.key</td><td>184 bytes</td><td>The data key, wrapped by the model key</td></tr><tr><td>artifacts.json</td><td>597 bytes</td><td>The list of fingerprints the image build reads. Not secret.</td></tr></tbody></table></div>'},
+ {by:"Builder",why:"A machine with no way in cannot be asked, by anyone, to hand over what it holds.",m:"Encrypted, in the S3 bucket in the builder's account.",k:"Wrapped copy stored next to the model. Only KMS can unwrap it.",st:"An image is built. It has no login, no remote agent, and a read-only disk.",p:0,t:"Build the sealed image",who:"Model builder",on:["pipeline"],e:[],
+  what:"The builder builds one machine image that does exactly one thing at boot: verify, unlock, lock, serve. There is no way to log in to it.",
+  tech:["Amazon Linux 2023 built with KIWI: one signed boot file (a unified kernel image), a read-only erofs root, and dm-verity checking every disk block.","Left out or masked: SSH, the Systems Manager agent, cloud-init, serial and rescue logins. The build refuses any image that has one.","Baked in: the runtime list, which holds the SHA-256 of each container archive, the bucket name, and the key ARN.","NVIDIA kernel modules are compiled on the builder and signed with our Secure Boot key; the kernel refuses any other module."],
+  proof:"Run: the build check passes on the released image and fails an image with a login package added. Console shows zero login prompts."},
+ {by:"Builder",why:"These four values are what KMS will compare at boot. Any change to the boot file, the disk, the Secure Boot keys, or the container list changes at least one of them.",m:"Encrypted, in the S3 bucket in the builder's account.",k:"Wrapped copy stored next to the model. Only KMS can unwrap it.",st:"The image is signed and registered. Its four measurements are known.",p:0,t:"Sign and measure",who:"Model builder",on:["pipeline","agent"],e:[["pipeline","agent","build summary: four measured values"]],
+  what:"The pipeline signs the boot file and computes the fingerprints the machine will report when it boots this exact image.",
+  tech:["PCR4 covers the boot file, which contains the kernel, the initrd, and the disk's root hash.","PCR7 covers the Secure Boot state, with our own keys enrolled.","PCR12 covers kernel command-line overrides and add-on boot files. It must stay at zero.","PCR15 is ours: the value after the loader has checked the containers (open), and the value after it has locked (locked).","The image is registered with UEFI boot, TPM 2.0, and the Secure Boot key data."],
+  proof:"Run: the values the machine reported at boot equal the pipeline's values (suite tests L1 and L2)."},
+ {by:"Builder",why:"This is what ties the key to the image instead of to a person. After it, even the account's admin cannot decrypt the model.",m:"Encrypted, in the S3 bucket in the builder's account.",k:"Wrapped. KMS will unwrap it only for this exact image, and only in the open state.",st:"Approved by a human and pinned by both keys.",p:0,t:"Check, approve, and pin the keys",who:"Deployer agent, one approver",on:["agent","mkey","lkey"],
+  e:[["agent","mkey","policy: release in the open state"],["agent","lkey","policy: release in the locked state"]],
+  what:"After the static checks pass, this exact build is approved. Only then are the two keys tied to the image's measurements. The builder can agree in advance, so approval follows as soon as every check passes, or decide by hand after reading the summary.",
+  tech:["The agent can only call fixed tools. No tool accepts policy text, a command, or a measured value.","The approval record names the SHA-256 of the build's output file, so it cannot be reused for another build. The agent's roles are denied writing it.","Model key policy: <code>kms:Decrypt</code> for the sealed machine's role only, and only when PCR4, 7, 12, and 15 (open) all match.","Lease key policy: the same, with PCR15 in the locked state.","Each customer is added by one more statement on both keys: that customer's machine role only, and the same four values. Removing it cuts that customer off and nobody else.","No other statement can use the keys, so no IAM policy can grant decryption to anyone else."],
+  proof:"Run: told to tie the keys to an image without approval, the agent checked the status and refused; a direct tool call was refused too. Suite tests S2, S3, and S11 pass."},
+ {by:"Customer",why:"The customer's service should not depend on the builder's storage being reachable, and the builder should not need a standing door into the customer's network. Moving ciphertext costs nothing in secrecy: without KMS it cannot be read.",m:"Encrypted, in the builder's bucket and as a copy in the customer's bucket.",k:"Wrapped. A wrapped copy travels with the release; only KMS, in the builder's account, can unwrap it.",st:"Does not exist in the customer's account yet.",p:1,t:"Copy the encrypted release to the customer",who:"Model builder and customer",on:["bbucket","cjobs"],
+  e:[["bbucket","cjobs","encrypted release, copied once",{via:155}]],
+  what:"The encrypted files, the wrapped key, and the lease token are copied into a folder of the customer's own bucket. The machine will load from there.",
+  tech:["The folder holds ciphertext only: the weights, the training copy, the container archive, the settings, the wrapped key, and the lease token.","The machine is told where the copy is by a tag set at launch. The tag is not trusted. It can only choose where files are fetched from, never what is accepted.","Every file fetched is checked against fingerprints baked into the measured image, so a swapped or changed file is refused whichever bucket it came from.","A malformed location (odd characters, path tricks, an overlong name) is ignored and the machine falls back to the builder's bucket."],
+  proof:"Run: the sealed machine loaded the model from the customer's bucket and every check passed (suite test L1). Refusing a changed container archive and changed weights was run with the builder's bucket as the source (suite tests B5 and B6); the same check runs for either bucket."},
+ {by:"Customer",why:"The customer controls the launch, so nothing set at launch may be able to change what runs or open a door.",m:"Encrypted, in the builder's bucket and as a copy in the customer's bucket.",k:"Wrapped. Only KMS, in the builder's account, can unwrap it.",st:"Launched in the customer's private subnet. Booting.",p:1,t:"Install and launch",who:"Customer",on:["agent","admin","tpm"],
+  e:[["agent","admin","install package",{via:155}],["admin","tpm","launches the image"]],
+  what:"The customer launches one template in their own account. It builds everything on their side and ends with the endpoint address. Nothing the customer sets at launch can open a door.",
+  tech:["One template creates the whole customer side: network, endpoints, bucket, key, log group, the machine's role, the machine, and a load balancer that gives the endpoint a name that stays the same across restarts.","The builder supplies six values: image ID, the two key ARNs, its bucket, its usage-reading role, and the machine type.","The same image serves every customer. Three launch tags tell the machine which bucket, key, and log group are this customer's. They are checked for shape and open nothing: they only say where the customer's own outputs go.","Private subnet with no internet route. Endpoints for S3, KMS, and CloudWatch Logs are the complete list of places the machine can reach.","Firewall: inbound only on port 443, only from the customer's app. No key pair. Instance metadata limited to one hop.","The customer owns a KMS key and a bucket for the release copy, their API keys, jobs, adapters, and usage records."],
+  proof:"Run: one stack, with nothing else done on the customer side, gave a machine that got the key and served. Launched with a start-up script and extra tags, the machine ran none of it and reported the same measurements (suite test L2)."},
+ {by:"Automatic",why:"If the boot file, the disk, or a kernel module was changed, it is either refused here or it shows up in the measurements and KMS will say no.",m:"Encrypted, in the builder's bucket and as a copy in the customer's bucket.",k:"Wrapped. Only KMS, in the builder's account, can unwrap it.",st:"Booted and measured. The runtime value (PCR15) is still empty.",p:2,t:"Measured boot",who:"Sealed machine",on:["tpm","loader"],e:[["tpm","loader","boot verified and measured"]],
+  what:"The firmware checks the boot file's signature and records what it runs in the machine's TPM. These records can be extended but never set.",
+  tech:["UEFI Secure Boot verifies the boot file against our enrolled key before running it.","The firmware extends PCR4, 7, and 12 in the NitroTPM.","dm-verity checks every disk block against the root hash inside the measured boot file.","The kernel enforces module signatures."],
+  proof:"Run: one changed byte on the system disk stops the kernel on first read. An image registered without the Secure Boot data gets no key."},
+ {by:"Automatic",why:"The container is code that will sit next to the weights. It has to be checked before any key exists on the machine.",m:"Encrypted. The container archive has been fetched and checked; the weights are still in the customer's bucket.",k:"Wrapped. Not yet requested.",st:"Open: PCR15 holds the fingerprint of the checked container list.",p:2,t:"Verify the containers, open the door",who:"Sealed machine",on:["cjobs","loader","tpm"],
+  e:[["cjobs","loader","encrypted container archive",{via:155}],["loader","tpm","extend PCR15: open"]],
+  what:"Before asking for any key, the loader checks that the container archive in storage is the one named in the image.",
+  tech:["The loader downloads the encrypted archive and compares its SHA-256 with the runtime list baked into the image.","On a mismatch it stops before any key request, and locks.","On a match it extends PCR15 with the runtime list's fingerprint. The machine is now in the open state, the only state the model key accepts."],
+  proof:"Run: with the archive swapped in the bucket, the loader stopped and CloudTrail shows no key request (suite test B5)."},
+ {by:"Automatic",why:"The proof is signed by AWS hardware, so the machine cannot lie about what it booted. The answer can be opened only by this one boot.",m:"Encrypted. The container archive has been fetched and checked; the weights are still in the customer's bucket.",k:"Plain copy in the loader's memory on the sealed machine. Nowhere else.",st:"Open, and holding the key.",p:2,t:"Prove the boot, receive the key",who:"Sealed machine and AWS KMS",on:["loader","mkey"],
+  e:[["loader","mkey","attestation document",-8],["mkey","loader","key for this boot only",-8]],
+  what:"The machine proves to KMS what it booted. KMS checks the proof against the policy and returns the key in a form only this boot can open.",
+  tech:["The loader makes a throwaway RSA-2048 key pair in memory.","<code>nitro-tpm-attest</code> returns an attestation document, signed by AWS, that carries the PCR values and the public key.","The loader calls <code>kms:Decrypt</code> on the wrapped data key with that document as the <code>Recipient</code> (RSAES_OAEP_SHA_256).","KMS compares the document's PCR values with the key policy and returns the data key encrypted to the throwaway public key.","The machine's role has no KMS right of its own. The key policy is the only grant."],
+  proof:"Run: KMS released the key once per boot to the right image. A different instance role on the same image was refused (suite test B4)."},
+ {by:"Automatic",why:"Whatever goes wrong later on this machine, the key cannot be fetched a second time.",m:"Encrypted. The container archive has been fetched and checked; the weights are still in the customer's bucket.",k:"In the loader's memory only. KMS now refuses to release it again on this boot.",st:"Locked: PCR15 has changed, so the model key policy no longer matches.",p:2,t:"Lock the door",who:"Sealed machine",on:["loader","tpm","mkey"],
+  e:[["loader","tpm","extend PCR15: locked"],["loader","mkey","second request: refused"]],
+  what:"Straight after the key request, the loader changes the machine's state so that the model key can never be fetched again on this boot.",
+  tech:["The loader extends PCR15 again, whether or not the release worked.","The machine is now in the locked state: the model key policy no longer matches, and the lease key policy now does.","Nothing that runs later on this machine can get the model key, including a compromised container."],
+  proof:"Run: a second request after the lock is answered with AccessDenied on every boot (suite test L4)."},
+ {by:"Automatic",why:"No plain copy of the weights lands on a disk that outlives the machine, and vLLM runs unmodified.",m:"Plain only in GPU memory. The training copy sits on a local disk encrypted with a key that exists only in RAM.",k:"Used to derive the working keys, then dropped from memory.",st:"Locked. The model is loaded and ready.",p:2,t:"Load the model",who:"Sealed machine",on:["cjobs","disk","vllm"],
+  e:[["cjobs","disk","ciphertext chunks",{via:245}],["disk","vllm","decrypted stream to the GPU"]],
+  what:"The weights go from storage to the GPU in pieces. vLLM is unmodified and needs no AWS credentials and no TPM.",
+  tech:["A local proxy fetches encrypted chunks from the customer's bucket, checks and decrypts each one, and serves byte ranges to vLLM's tensorizer loader. It stops when the model is ready.","Before the model server starts, a firewall is set: its container may reach the proxy and nothing else. If the rules cannot be set, the machine does not start the model.","The container image and the training copy of the weights are unpacked onto the local NVMe disk under dm-crypt, with a random key that exists only in RAM.","Measured: a 3.4 GiB model added 4.6 GiB of host memory at peak, and loading needs about twice the model's size in GPU memory."],
+  proof:"Run: one changed byte in the encrypted weights and the model never serves (suite test B6). The system disk after a run equals the released image (L12). A test from inside the model server's container found outbound connections blocked."},
+ {by:"Customer",why:"The model server has more doors than a customer should get. The gate leaves four open, and only to callers the customer has given a key.",m:"In GPU memory, answering questions.",k:"Gone from memory.",st:"Locked and serving on the private network.",p:3,t:"Serve the customer's app",who:"Customer's app and sealed machine",on:["app","cjobs","gate","vllm"],
+  e:[["app","gate","question, over HTTPS, with an API key"],["gate","vllm","four fixed paths only"],["cjobs","gate","the customer's API key list"]],
+  what:"The customer's app calls the machine on the private network over HTTPS, with an API key. A small gate passes on four paths and nothing else.",
+  tech:["The gate listens on HTTPS, port 443. Each boot makes a fresh certificate whose private key stays in memory; its fingerprint is written to the customer's log so the app can pin it.","The three model paths need an API key from a file the customer keeps in their own bucket. The machine re-reads it every 30 seconds, so the customer can add or withdraw keys without a restart. The health check needs no key.","The gate (nginx) forwards chat completions, completions, the model list, and the health check under fixed paths. Everything else is 'not found', including the door that loads adapters.","vLLM listens inside the machine only, as a non-root user, on a read-only file system, with all capabilities dropped. Its container can open no outbound connection.","Per-token probabilities are switched off (<code>--max-logprobs 0</code>)."],
+  proof:"Run: a request with no key was refused, one with a valid key was answered, and the certificate matched the fingerprint in the log. 13 other paths, including four path tricks, all returned 'not found'; a scan of 12 ports found only 443 open (suite tests L3 and L5)."},
+ {by:"Customer",why:"The customer never runs code next to the weights, and only adapter-shaped files can leave the machine.",m:"Base model unchanged. The customer's adapter is loaded beside it and stored under the customer's own key.",k:"Gone from memory.",st:"Locked, serving the base model and the adapter.",p:3,t:"Fine-tune on private data",who:"Customer and sealed machine",on:["cjobs","jobs","vllm"],
+  e:[["cjobs","jobs","job form and data",-8],["jobs","cjobs","adapter, under the customer's key",-8],["jobs","vllm","load adapter"]],
+  what:"The customer supplies data and a short form, never code. The machine trains a small add-on (a LoRA adapter) and serves the base model plus that adapter.",
+  tech:["The job runner polls the customer's bucket. Nobody pushes anything to the machine.","The form is checked against the builder's limits: known fields only, rank up to 16, up to 2,000 steps, a bounded learning rate, locations inside the customer's bucket.","The trainer runs with no network, no credentials, no TPM, as an unprivileged user, with the base weights read-only.","Only three files may leave: the adapter, its settings, and a short metrics file. Each is checked for kind and size.","The adapter is stored under the customer's own KMS key."],
+  proof:"Run: one good form trained in about 80 seconds while the model kept answering; six bad forms were refused with a reason (suite tests L6 and L7). About 30,000 malformed inputs were fed to the code that reads forms, adapters, and records; four crashes were found and fixed."},
+ {by:"Automatic",why:"The customer can check that only counts leave their account. The builder can tell if a record was changed or removed.",m:"In GPU memory, answering questions.",k:"Gone from memory.",st:"Locked and serving. Logs and usage records flow to the customer's side.",p:3,t:"Logs to the customer, counts to the builder",who:"Sealed machine",on:["logs","clog","meter","usage","operator"],
+  e:[["logs","clog","machine log"],["meter","usage","sealed usage record",{via:508}],["usage","operator","usage counts, read-only",{via:532,ax:30,bx:-20}]],
+  what:"Everything the machine logs goes to the customer. The builder gets a small record of counts that the customer can read first.",
+  tech:["The machine's log goes to the customer's log group. Trainer output is never sent, because values printed during training are the risky ones.","Every two minutes: requests, tokens in, tokens out, and the machine's own check requests. Numbers only.","Each record carries an HMAC-SHA256 seal made with a secret only the machine and the builder hold, and a sequence number.","The record is written to the customer's bucket. The builder's role can read that one folder and nothing else."],
+  proof:"Run: the builder's check accepted the seals and caught a changed and a deleted record; the customer's log had zero trainer lines (suite tests L8 and L10)."},
+ {by:"Automatic",why:"The builder keeps control after shipping. Access can be withdrawn in minutes without touching the customer's account.",m:"In GPU memory until the lease ends. After a power-off nothing readable is left.",k:"Gone from memory. A new boot would need KMS again.",st:"Serving while the lease renews. Powers itself off when it does not.",p:3,t:"Renew the lease, or stop",who:"Sealed machine and model builder",on:["lease","lkey","operator"],
+  e:[["lease","lkey","renew every 60 seconds"],["operator","lkey","disable the key"]],
+  what:"The machine must keep proving itself to keep serving. When the builder disables the keys, the next renewals fail and the machine switches itself off.",
+  tech:["Every 60 seconds the machine attests again and asks KMS to decrypt a small lease token under the lease key, which releases only in the locked state.","Two refusals in a row mean cut-off: stop serving, write the reason to the customer's log, power off.","If KMS is only unreachable, the machine keeps serving for a five-minute grace time, then stops.","If the lease service itself cannot stay up, the machine powers off. There is no state in which the model serves without a lease."],
+  proof:"Run: answers stopped 80 to 120 seconds after the keys were disabled, across all runs so far. A 170-second KMS outage caused no shutdown (suite test L13)."}
+];
+
+const svg = document.getElementById("d2"), NS = "http://www.w3.org/2000/svg";
+const el = (n, a, t) => { const e = document.createElementNS(NS, n); for (const k in a) e.setAttribute(k, a[k]); if (t != null) e.textContent = t; return e; };
+function edgePoint(r, tx, ty) {           // where the line from a box's center to (tx,ty) leaves the box
+  const cx = r[0] + r[2] / 2, cy = r[1] + r[3] / 2, dx = tx - cx, dy = ty - cy;
+  const k = Math.min(dx ? (r[2] / 2 + 4) / Math.abs(dx) : 1e9, dy ? (r[3] / 2 + 4) / Math.abs(dy) : 1e9);
+  return [cx + dx * k, cy + dy * k];
+}
+const F = "Inter, system-ui, sans-serif";
+function frame(x, y, w, h, label, strong) {
+  svg.appendChild(el("rect", {x, y, width:w, height:h, rx:14, fill:strong ? "#FFFFFF" : "#E7E8E1", "fill-opacity":strong ? 1 : .6, stroke:"#222F30", "stroke-opacity":strong ? .55 : .25, "stroke-width":strong ? 1.5 : 1}));
+  svg.appendChild(el("text", {x:x + 14, y:y + 22, "font-size":10.5, "font-weight":600, "letter-spacing":1.4, fill:"#222F30", "font-family":F}, label));
+}
+function draw(i) {
+  const st = STEPS[i];
+  svg.textContent = "";
+  const defs = el("defs", {}), m = el("marker", {id:"h", viewBox:"0 0 10 10", refX:9, refY:5, markerWidth:7, markerHeight:7, orient:"auto"});
+  m.appendChild(el("path", {d:"M0 0L10 5L0 10z", fill:"#222F30"})); defs.appendChild(m); svg.appendChild(defs);
+  frame(18, 22, 352, 530, "MODEL BUILDER ACCOUNT");
+  frame(392, 22, 550, 530, "CUSTOMER ACCOUNT");
+  frame(402, 52, 320, 448, "EC2 SEALED MACHINE - NO LOGIN", true);
+  for (const id in N) {
+    const r = box(id), n = N[id], on = st.on.includes(id), two = n.length > 3, cx = r[0] + W / 2;
+    svg.appendChild(el("rect", {x:r[0], y:r[1], width:W, height:H, rx:10, fill:on ? "#222F30" : "#FFFFFF", stroke:on ? "#9FD16A" : "#222F30", "stroke-opacity":on ? 1 : .28, "stroke-width":on ? 2.2 : 1}));
+    svg.appendChild(el("text", {x:cx, y:r[1] + (two ? 19 : 28), "text-anchor":"middle", "font-size":12.5, "font-weight":600, fill:on ? "#E7E8E1" : "#222F30", "font-family":F}, n[2]));
+    if (two) svg.appendChild(el("text", {x:cx, y:r[1] + 35, "text-anchor":"middle", "font-size":11.5, fill:on ? "#CEF79F" : "#222F30", "fill-opacity":on ? 1 : .65, "font-family":F}, n[3]));
+  }
+  st.e.forEach(([a, b, label, opt], k) => {
+    const A = box(a), B = box(b), ac = [A[0] + W / 2, A[1] + H / 2], bc = [B[0] + W / 2, B[1] + H / 2];
+    let bx, by;
+    if (opt && opt.via) {                // a routed path along an empty corridor between rows
+      const ax = ac[0] + (opt.ax || 0), ex = bc[0] + (opt.bx || 0), y = opt.via;
+      const ay = y > ac[1] ? A[1] + H + 2 : A[1] - 2, ey = y > bc[1] ? B[1] + H + 4 : B[1] - 4;
+      svg.appendChild(el("path", {d:`M${ax} ${ay}V${y}H${ex}V${ey}`, fill:"none", stroke:"#222F30", "stroke-width":2, "marker-end":"url(#h)"}));
+      bx = (ax + ex) / 2; by = y;
+    } else {
+      let [x1, y1] = edgePoint(A, bc[0], bc[1]), [x2, y2] = edgePoint(B, ac[0], ac[1]);
+      if (opt) { const dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy) || 1, nx = -dy / L * opt, ny = dx / L * opt; x1 += nx; y1 += ny; x2 += nx; y2 += ny; }
+      svg.appendChild(el("line", {x1, y1, x2, y2, stroke:"#222F30", "stroke-width":2, "marker-end":"url(#h)"}));
+      const t = typeof opt === "number" ? (k % 2 ? .68 : .32) : .5;      // keep the badges of a paired arrow apart
+      bx = x1 + (x2 - x1) * t; by = y1 + (y2 - y1) * t;
+    }
+    svg.appendChild(el("circle", {cx:bx, cy:by, r:10, fill:"#CEF79F", stroke:"#222F30", "stroke-width":1.5}));
+    svg.appendChild(el("text", {x:bx, y:by + 4, "text-anchor":"middle", "font-size":11.5, "font-weight":700, fill:"#222F30", "font-family":F}, String.fromCharCode(97 + k)));
+  });
+  svg.setAttribute("aria-label", "Step " + (i + 1) + ": " + st.t + ". " + st.what);
+}
+let cur = 0;
+const $ = id => document.getElementById(id);
+function cell(id, now, before) {
+  const d = $(id); d.querySelector("p").textContent = now;
+  d.classList.toggle("changed", before != null && before !== now);
+  let e = d.querySelector("em"); if (e) e.remove();
+  if (before != null && before !== now) { e = document.createElement("em"); e.textContent = "changed in this step"; d.appendChild(e); }
+}
+function show(i) {
+  cur = Math.max(0, Math.min(STEPS.length - 1, i));
+  const st = STEPS[cur], pv = cur ? STEPS[cur - 1] : null;
+  draw(cur);
+  $("p-title").textContent = (cur + 1) + ". " + st.t;
+  $("p-by").textContent = st.by === "Automatic" ? "Happens by itself" : "Done by the " + st.by.toLowerCase();
+  $("p-what").textContent = st.what;
+  $("p-why").textContent = st.why;
+  $("p-tech").innerHTML = st.tech.map(t => "<li>" + t + "</li>").join("");
+  $("p-boxes").innerHTML = st.on.map(id => "<li><b>" + N[id][2] + "</b>" + ABOUT[id] + "</li>").join("");
+  $("p-fig").hidden = !st.fig; $("p-fig").innerHTML = st.fig || "";
+  $("p-proof").textContent = st.proof;
+  cell("st-m", st.m, pv && pv.m); cell("st-k", st.k, pv && pv.k); cell("st-s", st.st, pv && pv.st);
+  $("count").textContent = "Step " + (cur + 1) + " of " + STEPS.length + " - " + PHASES[st.p][0];
+  $("arrows").innerHTML = st.e.map((e, k) => "<li><span class=\"num\">" + String.fromCharCode(97 + k) + "</span><span><b>" + N[e[0]][2] + " to " + N[e[1]][2] + ":</b> " + e[2] + "</span></li>").join("");
+  $("cap").textContent = st.e.length ? "Dark boxes take part in this step. The arrows happen in the order a, b, c." : "The dark box does the work in this step. Nothing crosses an account boundary.";
+  for (const [a, b] of [["prev", "next"], ["prev2", "next2"]]) { $(a).disabled = cur === 0; $(b).disabled = cur === STEPS.length - 1; }
+  document.querySelectorAll("#track button").forEach((b, k) => { k === cur ? b.setAttribute("aria-current", "step") : b.removeAttribute("aria-current"); b.classList.toggle("done", k < cur); });
+}
+PHASES.forEach(([name, when], k) => {
+  const g = document.createElement("div"); g.className = "ph";
+  g.innerHTML = "<b>" + name + "</b><small>" + when + "</small>";
+  STEPS.forEach((s, n) => { if (s.p !== k) return; const b = document.createElement("button"); b.type = "button"; b.innerHTML = "<i>" + (n + 1) + "</i><span>" + s.t + "</span>"; b.onclick = () => show(n); g.appendChild(b); });
+  $("track").appendChild(g);
+});
+for (const id of ["prev", "prev2"]) $(id).onclick = () => show(cur - 1);
+for (const id of ["next", "next2"]) $(id).onclick = () => show(cur + 1);
+document.addEventListener("keydown", e => { if (e.target.closest("input,textarea")) return; if (e.key === "ArrowRight") show(cur + 1); if (e.key === "ArrowLeft") show(cur - 1); });
+show(0);
+</script>

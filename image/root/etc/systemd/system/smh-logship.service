@@ -1,0 +1,14 @@
+[Unit]
+Description=smh-poc log shipper: this machine's log goes to the customer's log group
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/smh/logs-enabled
+
+[Service]
+Environment=PYTHONPATH=/usr/local/lib/smh
+ExecStart=/usr/bin/python3 -m sealbox.logship
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

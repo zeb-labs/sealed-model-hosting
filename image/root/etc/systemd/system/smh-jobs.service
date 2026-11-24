@@ -1,0 +1,16 @@
+[Unit]
+Description=smh-poc job runner: fine-tuning jobs from the customer's bucket
+After=smh-loader.service
+Requires=smh-loader.service
+ConditionPathExists=/etc/smh/jobs-enabled
+
+[Service]
+Environment=PYTHONPATH=/usr/local/lib/smh
+ExecStart=/usr/bin/python3 -m sealbox.jobrunner
+Restart=on-failure
+RestartSec=20
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,91 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  smh-poc M5 test client: stands for the customer's own application. An
+  ordinary machine in the customer's network with no login, no role and no
+  internet. It runs one fixed script at boot (infra/m1/client-test.sh) and
+  prints the results to its console. With Allowed=false the firewall rule is
+  left out, to show that a machine outside the allowed group cannot connect.
+  Tags come from the stack tags.
+
+Parameters:
+  Ami:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+  CustomerVpcId: {Type: "AWS::EC2::VPC::Id"}
+  UserData: {Type: String}
+  Allowed: {Type: String, Default: "true", AllowedValues: ["true", "false"]}
+  CustomerBucket: {Type: String}
+  CustomerKeyArn: {Type: String}
+  S3PrefixList: {Type: String}
+
+Conditions:
+  IsAllowed: !Equals [!Ref Allowed, "true"]
+
+Resources:
+  # The stand-in for the customer's app takes questions from, and writes answers
+  # to, the demo/ folder of the customer's bucket. Nothing else.
+  ClientRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: smh-poc-client-role
+      Path: /zl/
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - {Effect: Allow, Principal: {Service: ec2.amazonaws.com}, Action: sts:AssumeRole}
+      Policies:
+        - PolicyName: smh-poc-client
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub arn:aws:s3:::${CustomerBucket}
+                Condition: {StringLike: {"s3:prefix": ["demo/*"]}}
+              - Effect: Allow
+                Action: [s3:GetObject, s3:PutObject, s3:DeleteObject]
+                Resource: !Sub arn:aws:s3:::${CustomerBucket}/demo/*
+              - Effect: Allow
+                Action: [kms:GenerateDataKey, kms:Decrypt]
+                Resource: !Ref CustomerKeyArn
+  ClientProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties: {InstanceProfileName: smh-poc-client-profile, Path: /zl/, Roles: [!Ref ClientRole]}
+  ClientSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: smh-poc-client-sg
+      GroupDescription: Test client. No inbound. Outbound to the sealed machine only.
+      VpcId: !Ref CustomerVpcId
+      SecurityGroupEgress:
+        # Every TCP port, on purpose: the port scan must be stopped by the sealed
+        # machine's side, not by the client's own firewall.
+        - {IpProtocol: tcp, FromPort: 0, ToPort: 65535, DestinationSecurityGroupId: !ImportValue smh-poc-sealed-sg-id}
+        # The customer's app reads questions from, and writes answers to, the customer's bucket (S3 endpoint only).
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, DestinationPrefixListId: !Ref S3PrefixList}
+      Tags: [{Key: Name, Value: smh-poc-client-sg}]
+  GateRule:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: IsAllowed
+    Properties:
+      GroupId: !ImportValue smh-poc-sealed-sg-id
+      Description: Inference endpoint (HTTPS), from the test client only
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      SourceSecurityGroupId: !Ref ClientSg
+  Client:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref Ami
+      InstanceType: m6i.large
+      IamInstanceProfile: !Ref ClientProfile
+      PropagateTagsToVolumeOnCreation: true
+      MetadataOptions: {HttpTokens: required, HttpPutResponseHopLimit: 1}
+      SubnetId: !ImportValue smh-poc-customer-subnet-id
+      SecurityGroupIds: [!Ref ClientSg]
+      UserData: {"Fn::Base64": !Ref UserData}
+      Tags: [{Key: Name, Value: smh-poc-client}]
+
+Outputs:
+  InstanceId: {Value: !Ref Client}

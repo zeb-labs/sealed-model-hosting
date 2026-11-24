@@ -1,0 +1,15 @@
+[Unit]
+Description=smh-poc loader: verify containers, fetch the key once, lock, start
+After=network-online.target docker.service smh-disk.service
+Wants=network-online.target
+Requires=docker.service smh-disk.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/smh-boot
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

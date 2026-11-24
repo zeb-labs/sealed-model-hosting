@@ -1,0 +1,272 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Sealed model hosting, the customer's side, in one stack. Creates a private
+  network with no internet route, the three AWS endpoints the machine needs,
+  the customer's own bucket, key and log group, the machine's role, the sealed
+  machine and a stable endpoint name. Uses nothing that already exists in the
+  account. The builder gives the customer the first six values.
+
+Parameters:
+  Ami: {Type: "AWS::EC2::Image::Id", Description: The sealed image (from the builder)}
+  ModelKeyArn: {Type: String, Description: The builder's model key (from the builder)}
+  LeaseKeyArn: {Type: String, Description: The builder's lease key (from the builder)}
+  BuilderBucket: {Type: String, Description: The builder's bucket with the encrypted release (from the builder)}
+  BuilderRoleArn: {Type: String, Description: "The builder's role that may read usage counts, and nothing else (from the builder)"}
+  InstanceType: {Type: String, Default: g5.xlarge, Description: GPU machine type (from the builder)}
+  Name: {Type: String, Default: smh-poc-oc, AllowedPattern: "[a-z][a-z0-9-]{2,24}", Description: Prefix for every name in this stack}
+  ModelSource: {Type: String, Default: "", Description: "Empty = load from the builder's bucket. Or s3://<your bucket>/model/<folder> after copying the release."}
+  RolePath: {Type: String, Default: /zl/, Description: IAM path for the machine's role}
+  Cidr: {Type: String, Default: 10.212.0.0/24, Description: "Address range of the new network (or of the new subnet inside an existing network)"}
+  # Only for an account that cannot have one more network (ours is at its limit of 5):
+  # build inside an existing network that already has a KMS endpoint.
+  ExistingVpcId: {Type: String, Default: "", Description: "Empty = create a new private network (the normal case)"}
+  ExistingKmsEndpointSg: {Type: String, Default: "", Description: "With ExistingVpcId: the security group of that network's KMS endpoint"}
+
+Conditions:
+  NewVpc: !Equals [!Ref ExistingVpcId, ""]
+  OldVpc: !Not [!Equals [!Ref ExistingVpcId, ""]]
+  HasSource: !Not [!Equals [!Ref ModelSource, ""]]
+
+Resources:
+  # ---------- private network: no internet gateway, no NAT ----------
+  Vpc:
+    Type: AWS::EC2::VPC
+    Condition: NewVpc
+    Properties: {CidrBlock: !Ref Cidr, EnableDnsSupport: true, EnableDnsHostnames: true, Tags: [{Key: Name, Value: !Sub "${Name}-vpc"}]}
+  Subnet:
+    Type: AWS::EC2::Subnet
+    Properties: {VpcId: !If [NewVpc, !Ref Vpc, !Ref ExistingVpcId], CidrBlock: !Ref Cidr, AvailabilityZone: !Select [0, !GetAZs ""], Tags: [{Key: Name, Value: !Sub "${Name}-subnet"}]}
+  Routes:
+    Type: AWS::EC2::RouteTable
+    Properties: {VpcId: !If [NewVpc, !Ref Vpc, !Ref ExistingVpcId], Tags: [{Key: Name, Value: !Sub "${Name}-rt"}]}
+  SubnetRoutes:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref Subnet, RouteTableId: !Ref Routes}
+  SealedSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${Name}-sealed-sg"
+      GroupDescription: Sealed machine. Inbound HTTPS from inside this network only. Outbound HTTPS only, and there is no internet route.
+      VpcId: !If [NewVpc, !Ref Vpc, !Ref ExistingVpcId]
+      SecurityGroupIngress: [{IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: !Ref Cidr}]
+      SecurityGroupEgress: [{IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0}]
+      Tags: [{Key: Name, Value: !Sub "${Name}-sealed-sg"}]
+  EndpointSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${Name}-endpoint-sg"
+      GroupDescription: KMS and Logs endpoints. HTTPS from the sealed machine only.
+      VpcId: !If [NewVpc, !Ref Vpc, !Ref ExistingVpcId]
+      SecurityGroupIngress: [{IpProtocol: tcp, FromPort: 443, ToPort: 443, SourceSecurityGroupId: !Ref SealedSg}]
+      Tags: [{Key: Name, Value: !Sub "${Name}-endpoint-sg"}]
+  S3Endpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties: {VpcId: !If [NewVpc, !Ref Vpc, !Ref ExistingVpcId], ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3", VpcEndpointType: Gateway, RouteTableIds: [!Ref Routes]}
+  KmsEndpointAccess:      # existing network only: let this machine reach the KMS endpoint that is already there
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: OldVpc
+    Properties: {GroupId: !Ref ExistingKmsEndpointSg, IpProtocol: tcp, FromPort: 443, ToPort: 443, SourceSecurityGroupId: !Ref SealedSg, Description: !Sub "${Name} sealed machine"}
+  KmsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: NewVpc
+    Properties:
+      VpcId: !If [NewVpc, !Ref Vpc, !Ref ExistingVpcId]
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.kms"
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref Subnet]
+      SecurityGroupIds: [!Ref EndpointSg]
+  LogsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !If [NewVpc, !Ref Vpc, !Ref ExistingVpcId]
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.logs"
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref Subnet]
+      SecurityGroupIds: [!Ref EndpointSg]
+      # Through this endpoint logs can go to the customer's log group and nowhere else.
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - {Effect: Allow, Principal: "*", Action: ["logs:CreateLogStream", "logs:PutLogEvents"], Resource: !GetAtt MachineLogs.Arn}
+
+  # ---------- the customer's own key, bucket and log group ----------
+  MachineLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: {LogGroupName: !Sub "/${Name}/sealed-machine", RetentionInDays: 7}
+  CustomerKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub "${Name} customer key. Protects the customer's data, adapters, results and API keys."
+      PendingWindowInDays: 7
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: TheCustomersAccountOwnsTheKey
+            Effect: Allow
+            Principal: {AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"}
+            Action: "kms:*"
+            Resource: "*"
+          - Sid: SealedMachineUsesItForCustomerData
+            Effect: Allow
+            Principal: {AWS: !GetAtt SealedRole.Arn}
+            Action: [kms:GenerateDataKey, kms:Decrypt, kms:DescribeKey]
+            Resource: "*"
+          - Sid: BuilderReadsUsageRecordsThroughS3Only
+            Effect: Allow
+            Principal: {AWS: !Ref BuilderRoleArn}
+            Action: kms:Decrypt
+            Resource: "*"
+            Condition: {StringEquals: {"kms:ViaService": !Sub "s3.${AWS::Region}.amazonaws.com"}}
+  CustomerKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties: {AliasName: !Sub "alias/${Name}-customer-key", TargetKeyId: !Ref CustomerKey}
+  CustomerBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${Name}-customer-${AWS::AccountId}"
+      PublicAccessBlockConfiguration: {BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true}
+      OwnershipControls: {Rules: [{ObjectOwnership: BucketOwnerEnforced}]}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault: {SSEAlgorithm: "aws:kms", KMSMasterKeyID: !GetAtt CustomerKey.Arn}
+  CustomerBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CustomerBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: OnlyTheCustomerKey
+            Effect: Deny
+            Principal: "*"
+            Action: s3:PutObject
+            Resource: !Sub "${CustomerBucket.Arn}/*"
+            Condition:
+              "Null": {"s3:x-amz-server-side-encryption-aws-kms-key-id": "false"}
+              StringNotEquals: {"s3:x-amz-server-side-encryption-aws-kms-key-id": !GetAtt CustomerKey.Arn}
+          - Sid: OnlyKmsEncryption
+            Effect: Deny
+            Principal: "*"
+            Action: s3:PutObject
+            Resource: !Sub "${CustomerBucket.Arn}/*"
+            Condition:
+              "Null": {"s3:x-amz-server-side-encryption": "false"}
+              StringNotEquals: {"s3:x-amz-server-side-encryption": "aws:kms"}
+          # The one thing the builder may read on the customer's side: usage counts.
+          - Sid: BuilderReadsUsageRecords
+            Effect: Allow
+            Principal: {AWS: !Ref BuilderRoleArn}
+            Action: s3:GetObject
+            Resource: !Sub "${CustomerBucket.Arn}/usage/*"
+          - Sid: BuilderListsUsageRecords
+            Effect: Allow
+            Principal: {AWS: !Ref BuilderRoleArn}
+            Action: s3:ListBucket
+            Resource: !GetAtt CustomerBucket.Arn
+            Condition: {StringLike: {"s3:prefix": ["usage/*"]}}
+
+  # ---------- the machine's role: no login, no admin rights ----------
+  SealedRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${Name}-sealed-role"
+      Path: !Ref RolePath
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement: [{Effect: Allow, Principal: {Service: ec2.amazonaws.com}, Action: "sts:AssumeRole"}]
+      Policies:
+        - PolicyName: sealed-machine
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # The builder's keys. Their own policies still demand the image's exact measurements.
+              - {Effect: Allow, Action: "kms:Decrypt", Resource: [!Ref ModelKeyArn, !Ref LeaseKeyArn]}
+              # The encrypted release and the lease token.
+              - {Effect: Allow, Action: "s3:GetObject", Resource: !Sub "arn:aws:s3:::${BuilderBucket}/*"}
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub "arn:aws:s3:::${Name}-customer-${AWS::AccountId}"
+                Condition: {StringLike: {"s3:prefix": ["jobs/*", "results/*"]}}
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource:
+                  - !Sub "arn:aws:s3:::${Name}-customer-${AWS::AccountId}/jobs/*"
+                  - !Sub "arn:aws:s3:::${Name}-customer-${AWS::AccountId}/data/*"
+                  - !Sub "arn:aws:s3:::${Name}-customer-${AWS::AccountId}/adapters/*"
+                  - !Sub "arn:aws:s3:::${Name}-customer-${AWS::AccountId}/results/*"
+                  - !Sub "arn:aws:s3:::${Name}-customer-${AWS::AccountId}/model/*"
+                  - !Sub "arn:aws:s3:::${Name}-customer-${AWS::AccountId}/gate/*"
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource:
+                  - !Sub "arn:aws:s3:::${Name}-customer-${AWS::AccountId}/adapters/*"
+                  - !Sub "arn:aws:s3:::${Name}-customer-${AWS::AccountId}/results/*"
+                  - !Sub "arn:aws:s3:::${Name}-customer-${AWS::AccountId}/usage/*"
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${Name}/sealed-machine:*"
+  SealedProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties: {InstanceProfileName: !Sub "${Name}-sealed-profile", Path: !Ref RolePath, Roles: [!Ref SealedRole]}
+
+  # ---------- the sealed machine ----------
+  Sealed:
+    Type: AWS::EC2::Instance
+    DependsOn: [S3Endpoint, LogsEndpoint, CustomerBucketPolicy, SubnetRoutes]
+    Properties:
+      ImageId: !Ref Ami
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref SealedProfile
+      PropagateTagsToVolumeOnCreation: true
+      MetadataOptions: {HttpTokens: required, HttpPutResponseHopLimit: 1, InstanceMetadataTags: enabled}
+      SubnetId: !Ref Subnet
+      SecurityGroupIds: [!Ref SealedSg]
+      Tags:
+        - {Key: Name, Value: !Sub "${Name}-sealed"}
+        # Not read by the machine; it makes the machine wait for its way to KMS.
+        - {Key: smh-kms-path, Value: !If [NewVpc, !Ref KmsEndpoint, !Ref KmsEndpointAccess]}
+        # The machine reads these three to find the customer's own places. They open nothing.
+        - {Key: smh-customer-bucket, Value: !Ref CustomerBucket}
+        - {Key: smh-customer-key, Value: !GetAtt CustomerKey.Arn}
+        - {Key: smh-log-group, Value: !Sub "/${Name}/sealed-machine"}
+        - !If [HasSource, {Key: smh-model-source, Value: !Ref ModelSource}, !Ref "AWS::NoValue"]
+
+  # ---------- a name that stays the same when the machine is restarted or replaced ----------
+  Balancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties: {Name: !Sub "${Name}-endpoint", Type: network, Scheme: internal, Subnets: [!Ref Subnet]}
+  Targets:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub "${Name}-sealed"
+      VpcId: !If [NewVpc, !Ref Vpc, !Ref ExistingVpcId]
+      Protocol: TCP          # passed straight through: TLS ends on the sealed machine
+      Port: 443
+      TargetType: instance
+      Targets: [{Id: !Ref Sealed}]
+      HealthCheckProtocol: TCP
+      HealthCheckIntervalSeconds: 10
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      TargetGroupAttributes: [{Key: deregistration_delay.timeout_seconds, Value: "0"}]
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref Balancer
+      Protocol: TCP
+      Port: 443
+      DefaultActions: [{Type: forward, TargetGroupArn: !Ref Targets}]
+
+Outputs:
+  Endpoint: {Value: !Sub "https://${Balancer.DNSName}", Description: The inference endpoint. Reachable from inside this network only. Send an API key.}
+  ApiKeyFile: {Value: !Sub "s3://${CustomerBucket}/gate/api-keys.txt", Description: "Put your API keys here, one per line (24 to 128 letters, digits, - or _)"}
+  Bucket: {Value: !Ref CustomerBucket}
+  KeyArn: {Value: !GetAtt CustomerKey.Arn}
+  LogGroup: {Value: !Ref MachineLogs}
+  MachineRoleArn: {Value: !GetAtt SealedRole.Arn, Description: The builder onboards this role}
+  InstanceId: {Value: !Ref Sealed}
+  VpcId: {Value: !If [NewVpc, !Ref Vpc, !Ref ExistingVpcId]}
+  SubnetId: {Value: !Ref Subnet}

@@ -1,0 +1,2 @@
+{"log-driver": "journald", "icc": false, "userland-proxy": false,
+ "runtimes": {"nvidia": {"path": "/usr/bin/nvidia-container-runtime", "args": []}}}

@@ -1,0 +1,194 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  smh-poc M1 base: builder network, customer network, artifacts bucket and the
+  two instance roles. Self-contained: uses nothing that already exists in the
+  account. Tags come from the stack tags (see deploy.sh).
+
+Resources:
+  # ---------- Builder side: public subnet, outbound only ----------
+  BuilderVpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.210.0.0/24
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags: [{Key: Name, Value: smh-poc-builder-vpc}]
+  BuilderIgw:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags: [{Key: Name, Value: smh-poc-builder-igw}]
+  BuilderIgwAttach:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties: {VpcId: !Ref BuilderVpc, InternetGatewayId: !Ref BuilderIgw}
+  BuilderSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref BuilderVpc
+      CidrBlock: 10.210.0.0/26
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags: [{Key: Name, Value: smh-poc-builder-subnet}]
+  BuilderRoutes:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref BuilderVpc
+      Tags: [{Key: Name, Value: smh-poc-builder-rt}]
+  BuilderDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: BuilderIgwAttach
+    Properties: {RouteTableId: !Ref BuilderRoutes, DestinationCidrBlock: 0.0.0.0/0, GatewayId: !Ref BuilderIgw}
+  BuilderSubnetRoutes:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref BuilderSubnet, RouteTableId: !Ref BuilderRoutes}
+  BuilderSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: smh-poc-builder-sg
+      GroupDescription: Builder machine. No inbound at all. Access is Session Manager only.
+      VpcId: !Ref BuilderVpc
+      SecurityGroupEgress:
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0}
+        - {IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0}
+      Tags: [{Key: Name, Value: smh-poc-builder-sg}]
+
+  # ---------- Customer side: private subnet, no internet ----------
+  CustomerVpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.211.0.0/24
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags: [{Key: Name, Value: smh-poc-customer-vpc}]
+  CustomerSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref CustomerVpc
+      CidrBlock: 10.211.0.0/26
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags: [{Key: Name, Value: smh-poc-customer-subnet}]
+  CustomerRoutes:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref CustomerVpc
+      Tags: [{Key: Name, Value: smh-poc-customer-rt}]
+  CustomerSubnetRoutes:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref CustomerSubnet, RouteTableId: !Ref CustomerRoutes}
+  SealedSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: smh-poc-sealed-sg
+      GroupDescription: Sealed machine. No inbound. Outbound HTTPS only, and the VPC has no internet route.
+      VpcId: !Ref CustomerVpc
+      SecurityGroupEgress:
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0}
+      Tags: [{Key: Name, Value: smh-poc-sealed-sg}]
+  EndpointSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: smh-poc-endpoint-sg
+      GroupDescription: KMS endpoint. HTTPS from the sealed machine only.
+      VpcId: !Ref CustomerVpc
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, SourceSecurityGroupId: !Ref SealedSg}
+      Tags: [{Key: Name, Value: smh-poc-endpoint-sg}]
+  S3Endpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref CustomerVpc
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.s3
+      VpcEndpointType: Gateway
+      RouteTableIds: [!Ref CustomerRoutes]
+  KmsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref CustomerVpc
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.kms
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref CustomerSubnet]
+      SecurityGroupIds: [!Ref EndpointSg]
+
+  # ---------- Artifacts bucket ----------
+  Artifacts:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub smh-poc-artifacts-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      OwnershipControls:
+        Rules: [{ObjectOwnership: BucketOwnerEnforced}]
+
+  # ---------- Roles (path /zl/) ----------
+  BuilderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: smh-poc-builder-role
+      Path: /zl/
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ec2.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: smh-poc-builder
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [s3:GetObject, s3:PutObject, s3:DeleteObject]
+                Resource: !Sub ${Artifacts.Arn}/*
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt Artifacts.Arn
+  BuilderProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: smh-poc-builder-profile
+      Path: /zl/
+      Roles: [!Ref BuilderRole]
+
+  SealedRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: smh-poc-sealed-instance-role
+      Path: /zl/
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ec2.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        # No KMS rights here on purpose. Decrypt is granted only by the key
+        # policy, and only with matching PCR values.
+        - PolicyName: smh-poc-sealed
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub ${Artifacts.Arn}/*
+  SealedProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: smh-poc-sealed-instance-profile
+      Path: /zl/
+      Roles: [!Ref SealedRole]
+
+Outputs:
+  BuilderSubnetId: {Value: !Ref BuilderSubnet, Export: {Name: smh-poc-builder-subnet-id}}
+  BuilderSgId: {Value: !Ref BuilderSg, Export: {Name: smh-poc-builder-sg-id}}
+  CustomerSubnetId: {Value: !Ref CustomerSubnet, Export: {Name: smh-poc-customer-subnet-id}}
+  SealedSgId: {Value: !Ref SealedSg, Export: {Name: smh-poc-sealed-sg-id}}
+  BucketName: {Value: !Ref Artifacts, Export: {Name: smh-poc-bucket-name}}
+  BuilderRoleArn: {Value: !GetAtt BuilderRole.Arn, Export: {Name: smh-poc-builder-role-arn}}
+  SealedRoleArn: {Value: !GetAtt SealedRole.Arn, Export: {Name: smh-poc-sealed-role-arn}}

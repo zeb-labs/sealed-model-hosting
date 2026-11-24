@@ -1,0 +1,111 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  smh-poc M5, data boundary. The customer's log group for the sealed machine,
+  a CloudWatch Logs endpoint in the customer's network whose policy lets
+  traffic reach that one log group only, network flow logs for the customer's
+  network, and the two narrow permissions M5 adds: the sealed machine may
+  write logs and usage records on the customer's side; the builder may read
+  the usage records and nothing else there. Tags come from the stack tags.
+
+Parameters:
+  CustomerVpcId: {Type: "AWS::EC2::VPC::Id"}
+  CustomerBucket: {Type: String}
+
+Resources:
+  MachineLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: {LogGroupName: /smh-poc/customer/sealed-machine, RetentionInDays: 7}
+  FlowLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: {LogGroupName: /smh-poc/customer/vpc-flow, RetentionInDays: 7}
+  FlowRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: smh-poc-flowlogs-role
+      Path: /zl/
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: vpc-flow-logs.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition: {StringEquals: {"aws:SourceAccount": !Ref "AWS::AccountId"}}
+      Policies:
+        - PolicyName: smh-poc-flowlogs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents, logs:DescribeLogStreams]
+                Resource: !GetAtt FlowLogs.Arn
+  VpcFlow:
+    Type: AWS::EC2::FlowLog
+    Properties:
+      ResourceType: VPC
+      ResourceId: !Ref CustomerVpcId
+      TrafficType: ALL
+      MaxAggregationInterval: 60
+      LogGroupName: !Ref FlowLogs
+      DeliverLogsPermissionArn: !GetAtt FlowRole.Arn
+
+  LogsEndpointSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: smh-poc-logs-endpoint-sg
+      GroupDescription: CloudWatch Logs endpoint. HTTPS from the sealed machine only.
+      VpcId: !Ref CustomerVpcId
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, SourceSecurityGroupId: !ImportValue smh-poc-sealed-sg-id}
+      Tags: [{Key: Name, Value: smh-poc-logs-endpoint-sg}]
+  LogsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref CustomerVpcId
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.logs
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!ImportValue smh-poc-customer-subnet-id]
+      SecurityGroupIds: [!Ref LogsEndpointSg]
+      # The customer's own wall: through this endpoint, logs can go to the
+      # customer's log group and nowhere else, whatever the machine tries.
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action: [logs:CreateLogStream, logs:PutLogEvents]
+            Resource: !GetAtt MachineLogs.Arn
+
+  SealedWrites:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: smh-poc-sealed-logs-and-usage
+      Roles: [smh-poc-sealed-instance-role]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: [logs:CreateLogStream, logs:PutLogEvents]
+            Resource: !GetAtt MachineLogs.Arn
+          - Effect: Allow
+            Action: s3:PutObject
+            Resource: !Sub arn:aws:s3:::${CustomerBucket}/usage/*
+  BuilderReadsUsage:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: smh-poc-builder-reads-usage
+      Roles: [smh-poc-builder-role]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: s3:ListBucket
+            Resource: !Sub arn:aws:s3:::${CustomerBucket}
+            Condition: {StringLike: {"s3:prefix": ["usage/*"]}}
+          - Effect: Allow
+            Action: s3:GetObject
+            Resource: !Sub arn:aws:s3:::${CustomerBucket}/usage/*
+
+Outputs:
+  MachineLogGroup: {Value: !Ref MachineLogs}
+  FlowLogGroup: {Value: !Ref FlowLogs}

@@ -1,0 +1,16 @@
+[Unit]
+Description=smh-poc front gate: this boot's TLS certificate
+After=network-online.target
+Wants=network-online.target
+Before=nginx.service
+ConditionPathExists=/etc/smh/gate-enabled
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/smh-gate
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

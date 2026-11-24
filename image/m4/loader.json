@@ -1,0 +1,37 @@
+{
+ "region": "us-east-1", "prefix": "m4", "runtime_pcr": "15", "workdir": "/var/lib/smh",
+ "make_dirs": ["/var/lib/smh-scratch/adapters", "/var/lib/smh-scratch/jobs"],
+ "weights": {"object": "model.tensors.sbox", "config_object": "model-config.sbox",
+             "config_dir": "/run/smh-model", "port": 8765, "container": "model-server",
+             "ready_url": "http://127.0.0.1:8000/health", "ready_timeout": 1500},
+ "training": {"object": "model-hf.sbox", "dir": "/var/lib/smh-scratch/base"},
+ "containers": {
+  "model-server": {
+   "compressed": true,
+   "run": ["--runtime=nvidia", "--gpus", "all", "--shm-size", "2g", "--user", "1000:1000", "-e", "HOME=/tmp",
+           "--read-only", "--tmpfs", "/tmp:exec", "--tmpfs", "/root:exec",
+           "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--restart", "no",
+           "-e", "HF_HUB_OFFLINE=1", "-e", "VLLM_NO_USAGE_STATS=1", "-e", "DO_NOT_TRACK=1",
+           "-e", "VLLM_ALLOW_RUNTIME_LORA_UPDATING=True",
+           "-v", "/run/smh-model:/model:ro", "-v", "/var/lib/smh-scratch/adapters:/adapters:ro",
+           "-p", "127.0.0.1:8000:8000",
+           "smh/model-server:latest",
+           "--model", "/model", "--served-model-name", "demo", "--load-format", "tensorizer",
+           "--model-loader-extra-config", "{\"tensorizer_uri\": \"http://{BRIDGE}:8765/model.tensors\"}",
+           "--max-logprobs", "0", "--enable-lora", "--max-lora-rank", "16", "--max-loras", "4",
+           "--gpu-memory-utilization", "0.45"]
+  }
+ },
+ "jobs": {
+  "bucket": "smh-poc-customer-111122223333",
+  "kms_key": "arn:aws:kms:us-east-1:111122223333:key/00000000-0000-0000-0000-000000000000",
+  "workdir": "/var/lib/smh-scratch/jobs", "adapters_dir": "/var/lib/smh-scratch/adapters",
+  "base_dir": "/var/lib/smh-scratch/base", "image": "smh/model-server:latest",
+  "load_url": "http://127.0.0.1:8000/v1/load_lora_adapter",
+  "completions_url": "http://127.0.0.1:8000/v1/completions", "base_name": "demo",
+  "max_rank": 16, "max_alpha": 32, "max_steps": 2000,
+  "min_learning_rate": 0.000001, "max_learning_rate": 0.001,
+  "max_data_bytes": 52428800, "jobs_per_day": 5, "train_timeout": 3600, "poll_seconds": 20,
+  "params_per_rank": "FILLED BY THE PIPELINE"
+ }
+}

@@ -1,0 +1,18 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  smh-poc TEST ONLY (suite test B7). What a hostile customer would add to
+  their own network to try to manage the sealed machine with Systems Manager:
+  the three endpoints the agent needs. Exists only while B7 runs.
+Parameters:
+  CustomerVpcId: {Type: "AWS::EC2::VPC::Id"}
+  EndpointSgId: {Type: "AWS::EC2::SecurityGroup::Id"}
+Resources:
+  Ssm:
+    Type: AWS::EC2::VPCEndpoint
+    Properties: {VpcId: !Ref CustomerVpcId, ServiceName: !Sub "com.amazonaws.${AWS::Region}.ssm", VpcEndpointType: Interface, PrivateDnsEnabled: true, SubnetIds: [!ImportValue smh-poc-customer-subnet-id], SecurityGroupIds: [!Ref EndpointSgId]}
+  SsmMessages:
+    Type: AWS::EC2::VPCEndpoint
+    Properties: {VpcId: !Ref CustomerVpcId, ServiceName: !Sub "com.amazonaws.${AWS::Region}.ssmmessages", VpcEndpointType: Interface, PrivateDnsEnabled: true, SubnetIds: [!ImportValue smh-poc-customer-subnet-id], SecurityGroupIds: [!Ref EndpointSgId]}
+  Ec2Messages:
+    Type: AWS::EC2::VPCEndpoint
+    Properties: {VpcId: !Ref CustomerVpcId, ServiceName: !Sub "com.amazonaws.${AWS::Region}.ec2messages", VpcEndpointType: Interface, PrivateDnsEnabled: true, SubnetIds: [!ImportValue smh-poc-customer-subnet-id], SecurityGroupIds: [!Ref EndpointSgId]}

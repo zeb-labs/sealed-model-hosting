@@ -1,0 +1,36 @@
+#!/bin/bash
+# TEST ONLY, never part of a real image. Answers one question: with Secure Boot
+# on, does this kernel refuse a kernel module that has no trusted signature?
+# It takes a harmless in-tree module (dummy network device), removes its
+# signature, and tries to load both versions.
+set -uo pipefail
+say() { echo "SMH PROBE $*"; }
+say "sig_enforce=$(cat /sys/module/module/parameters/sig_enforce 2>&1) lockdown=$(cat /sys/kernel/security/lockdown 2>&1)"
+say "secure_boot_var=$(od -An -tu1 -j4 -N1 /sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c 2>/dev/null | tr -d ' ')"
+W=$(mktemp -d -p /run); trap 'rm -rf "$W"' EXIT
+src=$(find "/lib/modules/$(uname -r)" -name 'dummy.ko*' | head -1)
+[ -n "$src" ] || { say "no dummy module found"; exit 0; }
+python3 - "$src" "$W/dummy.ko" <<'PY'
+import sys, lzma, struct, subprocess
+src, dst = sys.argv[1:3]
+if src.endswith(".xz"): data = lzma.open(src).read()
+elif src.endswith(".zst"): data = subprocess.run(["zstd", "-dc", src], capture_output=True, check=True).stdout
+else: data = open(src, "rb").read()
+MAGIC = b"~Module signature appended~\n"
+if data.endswith(MAGIC):
+    sig_len = struct.unpack(">I", data[-len(MAGIC) - 4 : -len(MAGIC)])[0]
+    data = data[: -(len(MAGIC) + 12 + sig_len)]
+    print("SMH PROBE signature removed, bytes:", sig_len)
+else:
+    print("SMH PROBE module had no appended signature")
+open(dst, "wb").write(data)
+PY
+modprobe -r dummy 2>/dev/null
+if out=$(modprobe dummy 2>&1); then say "signed_module=LOADED"; modprobe -r dummy; else say "signed_module=REFUSED $out"; fi
+if out=$(insmod "$W/dummy.ko" 2>&1); then say "unsigned_module=LOADED"; rmmod dummy; else say "unsigned_module=REFUSED $(echo "$out" | tr '\n' ' ' | cut -c1-120)"; fi
+# A module signed with OUR Secure Boot (UEFI db) key, prepared at build time.
+if [ -f /usr/local/lib/smh/dummy-dbsigned.ko ]; then
+    if out=$(insmod /usr/local/lib/smh/dummy-dbsigned.ko 2>&1); then say "db_signed_module=LOADED"; rmmod dummy
+    else say "db_signed_module=REFUSED $(echo "$out" | tr '\n' ' ' | cut -c1-120)"; fi
+fi
+say "trusted_keyrings: $(grep -E 'builtin_trusted|secondary_trusted|\.machine|\.platform' /proc/keys | awk '{print $NF" "$(NF-1)}' | tr '\n' ';')"

@@ -1,0 +1,109 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  smh-poc M4, the customer's side (stands for the customer in our one account):
+  the customer's own KMS key and bucket for job forms, training data, adapters
+  and results. The bucket refuses any upload that is not encrypted with the
+  customer's key. The sealed machine may read jobs and data and write adapters
+  and results; the builder has no rights here. Tags come from the stack tags.
+
+Parameters:
+  CustomerAdminArn: {Type: String}
+
+Resources:
+  CustomerKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: smh-poc customer key. Protects the customer's data, adapters and results.
+      PendingWindowInDays: 7
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: CustomerAdminOwnsTheKey
+            Effect: Allow
+            Principal: {AWS: !Ref CustomerAdminArn}
+            Action: "kms:*"
+            Resource: "*"
+          - Sid: SealedMachineUsesItForCustomerData
+            Effect: Allow
+            Principal: {AWS: !ImportValue smh-poc-sealed-role-arn}
+            Action: [kms:GenerateDataKey, kms:Decrypt, kms:DescribeKey]
+            Resource: "*"
+          # M8: the customer's own app (the demo's stand-in). Named by a condition,
+          # because that role exists only while the client stack does.
+          - Sid: CustomerAppUsesItForItsOwnQuestions
+            Effect: Allow
+            Principal: {AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"}
+            Action: [kms:GenerateDataKey, kms:Decrypt]
+            Resource: "*"
+            Condition: {ArnEquals: {"aws:PrincipalArn": !Sub "arn:aws:iam::${AWS::AccountId}:role/zl/smh-poc-client-role"}}
+          # M5: the builder reads usage records. This works only through S3, and
+          # the builder's S3 rights cover the usage/ folder only (control.yaml).
+          - Sid: BuilderReadsUsageRecordsThroughS3Only
+            Effect: Allow
+            Principal: {AWS: !ImportValue smh-poc-builder-role-arn}
+            Action: kms:Decrypt
+            Resource: "*"
+            Condition: {StringEquals: {"kms:ViaService": !Sub "s3.${AWS::Region}.amazonaws.com"}}
+  CustomerKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties: {AliasName: alias/smh-poc-customer-key, TargetKeyId: !Ref CustomerKey}
+
+  CustomerBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub smh-poc-customer-${AWS::AccountId}
+      PublicAccessBlockConfiguration: {BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true}
+      OwnershipControls: {Rules: [{ObjectOwnership: BucketOwnerEnforced}]}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault: {SSEAlgorithm: "aws:kms", KMSMasterKeyID: !GetAtt CustomerKey.Arn}
+  CustomerBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CustomerBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # Deny only when the upload ASKS for something else. An upload that
+          # names no key gets the bucket default, which is the customer's key.
+          - Sid: OnlyTheCustomerKey
+            Effect: Deny
+            Principal: "*"
+            Action: s3:PutObject
+            Resource: !Sub ${CustomerBucket.Arn}/*
+            Condition:
+              "Null": {"s3:x-amz-server-side-encryption-aws-kms-key-id": "false"}
+              StringNotEquals:
+                s3:x-amz-server-side-encryption-aws-kms-key-id: !GetAtt CustomerKey.Arn
+          - Sid: OnlyKmsEncryption
+            Effect: Deny
+            Principal: "*"
+            Action: s3:PutObject
+            Resource: !Sub ${CustomerBucket.Arn}/*
+            Condition:
+              "Null": {"s3:x-amz-server-side-encryption": "false"}
+              StringNotEquals: {"s3:x-amz-server-side-encryption": "aws:kms"}
+
+  SealedAccess:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: smh-poc-sealed-customer-bucket
+      Roles: [smh-poc-sealed-instance-role]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: s3:ListBucket
+            Resource: !GetAtt CustomerBucket.Arn
+            Condition: {StringLike: {"s3:prefix": ["jobs/*", "results/*"]}}
+          - Effect: Allow
+            Action: s3:GetObject
+            Resource: [!Sub "${CustomerBucket.Arn}/jobs/*", !Sub "${CustomerBucket.Arn}/data/*", !Sub "${CustomerBucket.Arn}/adapters/*", !Sub "${CustomerBucket.Arn}/results/*", !Sub "${CustomerBucket.Arn}/model/*", !Sub "${CustomerBucket.Arn}/gate/*"]
+          - Effect: Allow
+            Action: s3:PutObject
+            Resource: [!Sub "${CustomerBucket.Arn}/adapters/*", !Sub "${CustomerBucket.Arn}/results/*"]
+
+Outputs:
+  BucketName: {Value: !Ref CustomerBucket}
+  KeyArn: {Value: !GetAtt CustomerKey.Arn}

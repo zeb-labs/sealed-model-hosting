@@ -1,0 +1,193 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  smh-poc cost guard. Estimates POC spend every hour from our tagged EC2
+  instances, emails alerts, stops our instances at the stop line and every
+  night. Touches only instances tagged app=Secure-model-hosting.
+  Tags come from the stack tags (see deploy.sh).
+
+Parameters:
+  AlertEmail:
+    Type: String
+  LimitUsd:
+    Type: Number
+    Default: 500
+  StopAtUsd:
+    Type: Number
+    Default: 450
+  FixedPerHourUsd:
+    Type: Number
+    Default: 0.25   # about 85 USD of non-GPU cost spread over two weeks
+  NightlyStopCronUtc:
+    Type: String
+    Default: cron(30 15 * * ? *)   # 21:00 IST
+
+Resources:
+  Alerts:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: smh-poc-alerts
+
+  AlertEmailSub:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref Alerts
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
+  State:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /smh-poc/cost-guard/state
+      Type: String
+      Value: '{"usd": 0, "last": null, "alerted": []}'
+
+  GuardLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/smh-poc-cost-guard
+      RetentionInDays: 14
+
+  GuardRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: smh-poc-cost-guard-role
+      Path: /zl/
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: smh-poc-cost-guard
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ec2:DescribeInstances
+                Resource: "*"
+              - Effect: Allow
+                Action: ec2:StopInstances
+                Resource: !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+                Condition:
+                  StringEquals:
+                    aws:ResourceTag/app: Secure-model-hosting
+                    aws:ResourceTag/owner: owner@example.com
+              - Effect: Allow
+                Action: [ssm:GetParameter, ssm:PutParameter]
+                Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/smh-poc/cost-guard/state
+              - Effect: Allow
+                Action: sns:Publish
+                Resource: !Ref Alerts
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt GuardLogs.Arn
+
+  Guard:
+    Type: AWS::Lambda::Function
+    DependsOn: GuardLogs
+    Properties:
+      FunctionName: smh-poc-cost-guard
+      Runtime: python3.13
+      Handler: index.handler
+      Timeout: 60
+      Role: !GetAtt GuardRole.Arn
+      Environment:
+        Variables:
+          STATE: /smh-poc/cost-guard/state
+          TOPIC: !Ref Alerts
+          LIMIT: !Ref LimitUsd
+          STOP_AT: !Ref StopAtUsd
+          FIXED: !Ref FixedPerHourUsd
+      Code:
+        ZipFile: |
+          import boto3, json, os, datetime as dt
+          ec2 = boto3.client("ec2"); ssm = boto3.client("ssm"); sns = boto3.client("sns")
+          E = os.environ
+          LIMIT, STOP_AT, FIXED = float(E["LIMIT"]), float(E["STOP_AT"]), float(E["FIXED"])
+          # On-demand Linux, us-east-1, USD per hour.
+          RATES = {"g5.8xlarge": 2.448, "g5.4xlarge": 1.624, "g5.2xlarge": 1.212, "g5.xlarge": 1.006,
+                   "g6.2xlarge": 0.9776, "g6.xlarge": 0.8048,
+                   "c6i.2xlarge": 0.34, "m6i.large": 0.096}
+          UNKNOWN = 5.0  # shortcut: conservative rate for unlisted types; add the type to RATES
+          FILTERS = [{"Name": "tag:app", "Values": ["Secure-model-hosting"]},
+                     {"Name": "tag:owner", "Values": ["owner@example.com"]},
+                     {"Name": "instance-state-name", "Values": ["pending", "running"]}]
+
+          def say(subject, msg):
+              sns.publish(TopicArn=E["TOPIC"], Subject=subject[:99], Message=msg)
+
+          def handler(event, ctx):
+              s = json.loads(ssm.get_parameter(Name=E["STATE"])["Parameter"]["Value"])
+              now = dt.datetime.now(dt.timezone.utc)
+              last = dt.datetime.fromisoformat(s["last"]) if s.get("last") else now
+              hours = max((now - last).total_seconds() / 3600, 0)
+              inst = [(i["InstanceId"], i["InstanceType"])
+                      for p in ec2.get_paginator("describe_instances").paginate(Filters=FILTERS)
+                      for r in p["Reservations"] for i in r["Instances"]]
+              rate = sum(RATES.get(t, UNKNOWN) for _, t in inst) + FIXED
+              s["usd"] = round(s.get("usd", 0) + hours * rate, 2)
+              s["last"] = now.isoformat()
+              sent = set(s.get("alerted", []))
+              for pct in (50, 80, 90, 100):
+                  if s["usd"] >= LIMIT * pct / 100 and str(pct) not in sent:
+                      sent.add(str(pct))
+                      say(f"smh-poc: spend about ${s['usd']} ({pct}% of ${LIMIT:.0f})",
+                          f"Estimated POC spend ${s['usd']} of ${LIMIT:.0f}. Running now: {inst or 'none'}. "
+                          f"Instances stop automatically at ${STOP_AT:.0f}.")
+              s["alerted"] = sorted(sent)
+              ssm.put_parameter(Name=E["STATE"], Value=json.dumps(s), Overwrite=True)
+              nightly = event.get("action") == "nightly"
+              if inst and (nightly or s["usd"] >= STOP_AT):
+                  ids = [i for i, _ in inst]
+                  ec2.stop_instances(InstanceIds=ids)
+                  why = "nightly stop (21:00 IST)" if nightly else f"estimated spend passed ${STOP_AT:.0f}"
+                  say("smh-poc: instances stopped",
+                      f"Stopped {ids}. Reason: {why}. Estimated spend ${s['usd']} of ${LIMIT:.0f}. "
+                      "Disks are kept. Start them again when needed.")
+              elif nightly:
+                  say("smh-poc: nightly check",
+                      f"Nothing running. Estimated POC spend ${s['usd']} of ${LIMIT:.0f}.")
+              return {"usd": s["usd"], "running": inst, "stopped": bool(inst and (nightly or s["usd"] >= STOP_AT))}
+
+  Hourly:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: smh-poc-cost-guard-hourly
+      ScheduleExpression: rate(1 hour)
+      Targets:
+        - Id: guard
+          Arn: !GetAtt Guard.Arn
+          Input: '{"action": "hourly"}'
+
+  Nightly:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: smh-poc-cost-guard-nightly
+      ScheduleExpression: !Ref NightlyStopCronUtc
+      Targets:
+        - Id: guard
+          Arn: !GetAtt Guard.Arn
+          Input: '{"action": "nightly"}'
+
+  HourlyPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref Guard
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt Hourly.Arn
+
+  NightlyPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref Guard
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt Nightly.Arn
+
+Outputs:
+  TopicArn:
+    Value: !Ref Alerts
+  FunctionName:
+    Value: !Ref Guard

@@ -1,0 +1,19 @@
+#!/bin/bash
+# Scratch space for containers and downloads. The root disk is read-only and
+# the model-server image is far too big for RAM, so we use the machine's local
+# NVMe disk, encrypted with a random key that exists only in kernel memory.
+# Nobody, including us, can read that disk after a reboot.
+set -uo pipefail
+S=/var/lib/smh-scratch
+dev=$(lsblk -dn -o NAME,MODEL | awk '/Instance Storage/{print "/dev/"$1; exit}')
+if [ -n "$dev" ] && cryptsetup open --batch-mode --type plain --cipher aes-xts-plain64 --key-size 512 \
+        --key-file /dev/urandom "$dev" smh-scratch \
+   && mkfs.xfs -q -f /dev/mapper/smh-scratch && mount -o nodev,nosuid /dev/mapper/smh-scratch $S; then
+    echo "SMH DISK local disk $dev encrypted (aes-xts, random key in RAM only), $(df -h --output=size $S | tail -1 | tr -d ' ')"
+else
+    mount -t tmpfs -o size=3g,nodev,nosuid tmpfs $S
+    echo "SMH DISK no usable local disk; using 3 GiB of RAM instead"
+fi
+mkdir -p $S/docker $S/work
+mount --bind $S/docker /var/lib/docker
+mount --bind $S/work /var/lib/smh

@@ -1,0 +1,15 @@
+[Unit]
+Description=smh-poc front gate: the customer's API keys, read from the customer's bucket
+After=nginx.service
+ConditionPathExists=/etc/smh/gate-enabled
+
+[Service]
+Environment=PYTHONPATH=/usr/local/lib/smh
+ExecStart=/usr/bin/python3 -m sealbox.gatekeys
+Restart=always
+RestartSec=15
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

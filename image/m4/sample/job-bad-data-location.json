@@ -1,0 +1,14 @@
+{
+ "method": "lora",
+ "dataset_uri": "s3://smh-poc-artifacts-111122223333/m4/model-hf.sbox",
+ "output_uri": "s3://smh-poc-customer-111122223333/adapters/",
+ "rank": 8,
+ "alpha": 16,
+ "learning_rate": 0.0002,
+ "max_steps": 150,
+ "target_modules": [
+  "q_proj",
+  "v_proj"
+ ],
+ "seed": 1
+}

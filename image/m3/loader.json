@@ -1,0 +1,20 @@
+{
+ "region": "us-east-1", "prefix": "m3", "runtime_pcr": "15", "workdir": "/var/lib/smh",
+ "weights": {"object": "model.tensors.sbox", "config_object": "model-config.sbox",
+             "config_dir": "/run/smh-model", "port": 8765, "container": "model-server",
+             "ready_url": "http://127.0.0.1:8000/health", "ready_timeout": 1500},
+ "containers": {
+  "model-server": {
+   "compressed": true,
+   "run": ["--runtime=nvidia", "--gpus", "all", "--shm-size", "2g",
+           "--read-only", "--tmpfs", "/tmp:exec", "--tmpfs", "/root:exec",
+           "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--restart", "no",
+           "-e", "HF_HUB_OFFLINE=1", "-e", "VLLM_NO_USAGE_STATS=1", "-e", "DO_NOT_TRACK=1",
+           "-v", "/run/smh-model:/model:ro", "-p", "127.0.0.1:8000:8000",
+           "smh/model-server:latest",
+           "--model", "/model", "--served-model-name", "demo", "--load-format", "tensorizer",
+           "--model-loader-extra-config", "{\"tensorizer_uri\": \"http://{BRIDGE}:8765/model.tensors\"}",
+           "--max-logprobs", "0"]
+  }
+ }
+}

@@ -1,0 +1,46 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  smh-poc sealed test machine. Launched the way a customer would: private
+  subnet, no inbound, IMDSv2 with hop limit 1, no key pair. The optional
+  parameters are customer-controlled inputs, used to test that they change
+  nothing. Tags come from the stack tags.
+
+Parameters:
+  Ami: {Type: "AWS::EC2::Image::Id"}
+  InstanceType: {Type: String, Default: m6i.large}
+  Profile: {Type: String, Default: smh-poc-sealed-instance-profile}
+  UserData: {Type: String, Default: ""}
+  CrossAccountTag: {Type: String, Default: ""}
+  Name: {Type: String, Default: smh-poc-sealed-test}
+  # Where the machine fetches the encrypted release: empty = the builder's bucket named in the image.
+  ModelSource: {Type: String, Default: ""}
+  # TEST ONLY (suite test B8): ask AWS for hibernation, which also needs an encrypted system disk.
+  Hibernate: {Type: String, Default: "false", AllowedValues: ["true", "false"]}
+
+Conditions:
+  HasUserData: !Not [!Equals [!Ref UserData, ""]]
+  HasCrossTag: !Not [!Equals [!Ref CrossAccountTag, ""]]
+  HasSource: !Not [!Equals [!Ref ModelSource, ""]]
+  WantHibernate: !Equals [!Ref Hibernate, "true"]
+
+Resources:
+  Sealed:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref Ami
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref Profile
+      PropagateTagsToVolumeOnCreation: true
+      MetadataOptions: {HttpTokens: required, HttpPutResponseHopLimit: 1, InstanceMetadataTags: enabled}
+      SubnetId: !ImportValue smh-poc-customer-subnet-id
+      SecurityGroupIds: [!ImportValue smh-poc-sealed-sg-id]
+      HibernationOptions: !If [WantHibernate, {Configured: true}, !Ref "AWS::NoValue"]
+      BlockDeviceMappings: !If [WantHibernate, [{DeviceName: /dev/xvda, Ebs: {Encrypted: true}}], !Ref "AWS::NoValue"]
+      UserData: !If [HasUserData, {"Fn::Base64": !Ref UserData}, !Ref "AWS::NoValue"]
+      Tags:
+        - {Key: Name, Value: !Ref Name}
+        - !If [HasCrossTag, {Key: cross-account, Value: !Ref CrossAccountTag}, !Ref "AWS::NoValue"]
+        - !If [HasSource, {Key: smh-model-source, Value: !Ref ModelSource}, !Ref "AWS::NoValue"]
+
+Outputs:
+  InstanceId: {Value: !Ref Sealed}

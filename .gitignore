@@ -1,0 +1,30 @@
+# Local and generated
+.DS_Store
+__pycache__/
+.pytest_cache/
+.venv/
+*.pyc
+
+# Third-party code: clone it yourself (see README, "Reference material")
+vendor/
+
+# Private source material (a call transcript and a colleague's walkthrough)
+docs/source/
+
+# Raw CloudTrail captures hold access key IDs and source addresses. The reports that judge them are kept.
+evidence/**/*cloudtrail*.json
+
+# Older saved copies of the page; the source is docs/flow-explainer.html
+/Sealed Model Hosting Flow*.html
+
+# Never commit keys
+*.key
+*.pem
+
+# Local settings (account-specific); smh.env.example is the template
+/smh.env
+
+# Local secrets and settings: never committed
+/.env
+.env.*
+!smh.env.example

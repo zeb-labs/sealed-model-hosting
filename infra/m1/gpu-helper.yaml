@@ -1,0 +1,35 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  smh-poc GPU build helper. Temporary: saves the model in tensorizer format
+  (that step needs a GPU) and tests vLLM against our proxy. Uses the AWS GPU
+  base image (drivers and Docker preinstalled). No inbound access: Session
+  Manager only. Delete after use. Tags come from the stack tags.
+
+Parameters:
+  Ami:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/deeplearning/ami/x86_64/base-oss-nvidia-driver-gpu-amazon-linux-2023/latest/ami-id
+  InstanceType: {Type: String, Default: g5.xlarge}
+
+Resources:
+  Helper:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref Ami
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: smh-poc-builder-profile
+      PropagateTagsToVolumeOnCreation: true
+      MetadataOptions: {HttpTokens: required, HttpPutResponseHopLimit: 1}
+      NetworkInterfaces:
+        - DeviceIndex: "0"
+          SubnetId: !ImportValue smh-poc-builder-subnet-id
+          GroupSet: [!ImportValue smh-poc-builder-sg-id]
+          AssociatePublicIpAddress: true   # outbound only: the security group has no inbound rules
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs: {VolumeSize: 150, VolumeType: gp3, Encrypted: true, DeleteOnTermination: true}
+      Tags: [{Key: Name, Value: smh-poc-gpu-helper}]
+
+Outputs:
+  InstanceId: {Value: !Ref Helper}
+  Az: {Value: !GetAtt Helper.AvailabilityZone}

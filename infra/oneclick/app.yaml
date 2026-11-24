@@ -1,0 +1,40 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  TEST ONLY. Stands for the customer's own application in the one-click
+  network: an ordinary machine with no login, no role and no internet. It runs
+  one fixed script at boot (infra/m1/client-test.sh) and prints the results to
+  its console.
+
+Parameters:
+  Ami:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+  VpcId: {Type: "AWS::EC2::VPC::Id"}
+  SubnetId: {Type: "AWS::EC2::Subnet::Id"}
+  Cidr: {Type: String, Default: 10.212.0.0/24}
+  UserData: {Type: String}
+  Name: {Type: String, Default: smh-poc-oc}
+
+Resources:
+  AppSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${Name}-app-sg"
+      GroupDescription: Test app. No inbound. Outbound inside the network only (every port, so the port scan is stopped by the other side).
+      VpcId: !Ref VpcId
+      SecurityGroupEgress: [{IpProtocol: tcp, FromPort: 0, ToPort: 65535, CidrIp: !Ref Cidr}]
+      Tags: [{Key: Name, Value: !Sub "${Name}-app-sg"}]
+  App:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref Ami
+      InstanceType: m6i.large
+      PropagateTagsToVolumeOnCreation: true
+      MetadataOptions: {HttpTokens: required, HttpPutResponseHopLimit: 1}
+      SubnetId: !Ref SubnetId
+      SecurityGroupIds: [!Ref AppSg]
+      UserData: {"Fn::Base64": !Ref UserData}
+      Tags: [{Key: Name, Value: !Sub "${Name}-app"}]
+
+Outputs:
+  InstanceId: {Value: !Ref App}

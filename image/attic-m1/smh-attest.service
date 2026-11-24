@@ -1,0 +1,14 @@
+[Unit]
+Description=smh-poc M1: attest to KMS and report the key release result
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/smh-attest
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

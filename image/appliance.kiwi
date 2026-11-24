@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  smh-poc sealed image, M3 (GPU, vLLM, encrypted streaming load). Our own description, written from the AWS
+  attestable AMI documentation (Amazon Linux 2023 + KIWI NG).
+  One measured boot file (UKI), read-only erofs root with dm-verity, RAM-only
+  overlay, and no way to log in. Only the Amazon Linux repository is used and
+  package signatures are checked.
+-->
+<image schemaversion="7.5" name="smh-sealed">
+    <description type="system">
+        <author>zeb secure model hosting POC</author>
+        <contact>zeb</contact>
+        <specification>Sealed attestable image, M3: GPU, vLLM, encrypted streaming load</specification>
+    </description>
+    <preferences>
+        <version>0.6.0</version>
+        <packagemanager>dnf</packagemanager>
+        <locale>en_US</locale>
+        <keytable>us</keytable>
+        <timezone>UTC</timezone>
+        <rpm-check-signatures>true</rpm-check-signatures>
+        <!--
+          console=ttyS0 gives boot OUTPUT on the serial console (we read the
+          test result there). There is no login on it: getty is off here and
+          masked in config.sh. rd.shell=0 and rd.emergency=halt: a failed boot
+          halts instead of opening a shell.
+        -->
+        <type
+            image="oem"
+            filesystem="xfs"
+            kernelcmdline="console=ttyS0 rd.shell=0 rd.emergency=halt systemd.getty_auto=false rd.kiwi.verity_options=panic-on-corruption"
+            firmware="uefi"
+            overlayroot="true"
+            overlayroot_write_partition="false"
+            overlayroot_readonly_filesystem="erofs"
+            overlayroot_readonly_partsize="8192"
+            erofscompression="lz4hc,level=12"
+            eficsm="false"
+            verity_blocks="all"
+            bootpartition="false"
+            efipartsize="200"
+            editbootinstall="edit_boot_install.sh">
+            <oemconfig>
+                <oem-resize>false</oem-resize>
+            </oemconfig>
+            <bootloader name="systemd_boot" timeout="0"/>
+            <initrd action="setup">
+                <dracut uefi="true"/>
+            </initrd>
+            <size unit="G">10</size>
+        </type>
+    </preferences>
+
+    <repository priority="1" package_gpgcheck="true" sourcetype="mirrorlist" customize="add-gpg-key.sh">
+        <source path="https://cdn.amazonlinux.com/al2023/core/mirrors/latest/$basearch/mirror.list"/>
+    </repository>
+
+    <packages type="image">
+        <namedCollection name="core"/>
+        <namedCollection name="ami-minimal"/>
+        <!-- boot chain: UKI, dm-verity, read-only root -->
+        <package name="systemd-boot"/>
+        <package name="binutils"/>
+        <package name="veritysetup"/>
+        <package name="dracut-kiwi-verity"/>
+        <package name="dracut-kiwi-overlay"/>
+        <package name="systemd-resolved"/>
+        <!-- attestation and key release -->
+        <package name="aws-nitro-tpm-tools"/>
+        <package name="tpm2-tools"/>
+        <package name="awscli-2"/>
+        <package name="openssl"/>
+        <!-- loader and container runtime -->
+        <package name="python3"/>
+        <package name="python3-cryptography"/>
+        <package name="docker"/>
+        <package name="iproute"/>
+        <!-- M3: encrypted local disk, container archive, S3 ranged reads -->
+        <package name="cryptsetup"/>
+        <package name="xfsprogs"/>
+        <package name="zstd"/>
+        <package name="python3-boto3"/>
+        <package name="nginx"/>
+        <!-- kernel modules the NVIDIA driver depends on (drm and friends) -->
+        <package name="kernel-modules-extra"/>
+        <!-- no way in: none of these are installed -->
+        <ignore name="openssh-server"/>
+        <ignore name="openssh-clients"/>
+        <ignore name="amazon-ssm-agent"/>
+        <ignore name="cloud-init"/>
+        <ignore name="cloud-init-cfg-ec2"/>
+        <ignore name="ec2-instance-connect"/>
+        <ignore name="update-motd"/>
+        <ignore name="amazon-chrony-config"/>
+        <ignore name="ec2-hibinit-agent"/>
+        <ignore name="firewalld"/>
+        <!-- no package installs after build -->
+        <ignore name="amazon-linux-repo-s3"/>
+        <ignore name="amazon-linux-repo-cdn"/>
+        <!-- we boot the UKI directly, no grub -->
+        <ignore name="grubby"/>
+        <ignore name="grub2-pc-modules"/>
+        <ignore name="grub2-tools"/>
+        <ignore name="grub2-efi-x64-ec2"/>
+        <ignore name="grub2-efi-x64"/>
+        <ignore name="grub2-efi-x64-modules"/>
+    </packages>
+    <packages type="bootstrap">
+        <package name="system-release"/>
+        <package name="dnf"/>
+        <ignore name="libcurl"/>
+        <ignore name="curl"/>
+        <ignore name="gnupg2"/>
+    </packages>
+</image>

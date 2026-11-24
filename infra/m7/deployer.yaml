@@ -1,0 +1,292 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  smh-poc M7, the deployer's fixed tools and their narrow roles. The agent
+  (AgentCore Harness) can only call the Gateway; the Gateway can only invoke
+  one Lambda function; the function can only start ONE Systems Manager
+  document on our two tagged machines, start and stop the builder, and create
+  or delete the GPU helper stack. None of these roles can decrypt, read model
+  objects, change a key policy, or write an approval record. Tags come from
+  the stack tags.
+
+Parameters:
+  CodeKey: {Type: String}            # deployer zip in the artifacts bucket
+  ModelArn: {Type: String}           # the Bedrock model or inference profile the agent uses
+  FoundationModelArn: {Type: String, Default: "arn:aws:bedrock:*::foundation-model/anthropic.*"}
+
+Mappings:
+  Tags:
+    Six:
+      Json: '{"business-unit":"ai","env":"innovation","category":"rnd","owner":"owner@example.com","app":"Secure-model-hosting","expire-date":"recurring"}'
+
+Resources:
+  # ---------- the one thing that can run on our machines ----------
+  StepDocument:
+    Type: AWS::SSM::Document
+    Properties:
+      Name: smh-poc-pipeline-step
+      DocumentType: Command
+      DocumentFormat: YAML
+      Content:
+        schemaVersion: "2.2"
+        description: smh-poc deployer. Runs ONE fixed pipeline step. Every input is checked against a list or a pattern.
+        parameters:
+          Step: {type: String, allowedValues: [lock, build, register, check, package, pin]}
+          Version: {type: String, allowedPattern: "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$"}
+          Prefix: {type: String, allowedPattern: "^m[0-9a-z-]{1,20}$"}
+          Model: {type: String, allowedPattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,60}/[A-Za-z0-9][A-Za-z0-9._-]{0,90}$"}
+          Gpu: {type: String, allowedValues: [g5.xlarge, g6.xlarge, g5.2xlarge, g6e.xlarge]}
+        mainSteps:
+          - action: aws:runShellScript
+            name: step
+            inputs:
+              timeoutSeconds: "7200"
+              runCommand:
+                - set -euo pipefail
+                - !Sub aws s3 sync --only-show-errors --delete --exact-timestamps --region ${AWS::Region} s3://smh-poc-artifacts-${AWS::AccountId}/build/src/ /opt/smh/src/
+                - exec bash /opt/smh/src/image/pipeline/deploy-step.sh '{{Step}}' '{{Version}}' '{{Prefix}}' '{{Model}}' '{{Gpu}}'
+
+  # ---------- the Lambda function behind the Gateway ----------
+  ToolsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: smh-poc-deployer-tools-role
+      Path: /zl/
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - {Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: sts:AssumeRole}
+      Policies:
+        - PolicyName: smh-poc-deployer-tools
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: Logs
+                Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/smh-poc-deployer-tools:*
+              - Sid: ReadStateResultsApprovalsAndTheArtifactList
+                Effect: Allow
+                Action: s3:GetObject
+                Resource:
+                  - !Sub arn:aws:s3:::smh-poc-artifacts-${AWS::AccountId}/deploy/*
+                  - !Sub arn:aws:s3:::smh-poc-artifacts-${AWS::AccountId}/approvals/*
+                  - !Sub arn:aws:s3:::smh-poc-artifacts-${AWS::AccountId}/build/out-*/summary.json
+                  - !Sub arn:aws:s3:::smh-poc-artifacts-${AWS::AccountId}/*/artifacts.json
+                  - !Sub arn:aws:s3:::smh-poc-artifacts-${AWS::AccountId}/build/src/infra/m1/gpu-helper.yaml
+              - Sid: ListSoAMissingObjectIsNotAnError
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub arn:aws:s3:::smh-poc-artifacts-${AWS::AccountId}
+              - Sid: WriteStateOnly
+                Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub arn:aws:s3:::smh-poc-artifacts-${AWS::AccountId}/deploy/*
+              - Sid: NeverApprovalsNeverLogs
+                Effect: Deny
+                Action: [s3:PutObject, s3:DeleteObject]
+                Resource: !Sub arn:aws:s3:::smh-poc-artifacts-${AWS::AccountId}/approvals/*
+              - Sid: LogsAreForHumans
+                Effect: Deny
+                Action: s3:GetObject
+                Resource: !Sub arn:aws:s3:::smh-poc-artifacts-${AWS::AccountId}/deploy/*/logs/*
+              - Sid: RunTheOneDocument
+                Effect: Allow
+                Action: ssm:SendCommand
+                Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:document/smh-poc-pipeline-step
+              - Sid: OnOurTaggedMachinesOnly
+                Effect: Allow
+                Action: ssm:SendCommand
+                Resource: !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+                Condition:
+                  StringEquals: {"ssm:resourceTag/app": Secure-model-hosting, "ssm:resourceTag/owner": owner@example.com}
+              - Sid: ReadCommandAndMachineState
+                Effect: Allow
+                Action: [ssm:GetCommandInvocation, ssm:DescribeInstanceInformation, ec2:DescribeInstances]
+                Resource: "*"
+              - Sid: StartAndStopOurTaggedMachines
+                Effect: Allow
+                Action: [ec2:StartInstances, ec2:StopInstances]
+                Resource: !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+                Condition:
+                  StringEquals: {"aws:ResourceTag/app": Secure-model-hosting, "aws:ResourceTag/owner": owner@example.com}
+              - Sid: TheHelperStackAndReadingTheBuilderStack
+                Effect: Allow
+                Action: [cloudformation:CreateStack, cloudformation:DeleteStack, cloudformation:DescribeStacks, cloudformation:DescribeStackEvents]
+                Resource:
+                  - !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/smh-poc-m1-gpu-helper/*
+              - Effect: Allow
+                Action: cloudformation:DescribeStacks
+                Resource: !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/smh-poc-m1-builder/*
+              - Sid: HandTheHelperStackToItsOwnRole
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt HelperStackRole.Arn
+                Condition: {StringEquals: {"iam:PassedToService": cloudformation.amazonaws.com}}
+  ToolsLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: {LogGroupName: /aws/lambda/smh-poc-deployer-tools, RetentionInDays: 14}
+  Tools:
+    Type: AWS::Lambda::Function
+    DependsOn: ToolsLogs
+    Properties:
+      FunctionName: smh-poc-deployer-tools
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      Timeout: 60
+      MemorySize: 256
+      Role: !GetAtt ToolsRole.Arn
+      Code: {S3Bucket: !Sub "smh-poc-artifacts-${AWS::AccountId}", S3Key: !Ref CodeKey}
+      Environment:
+        Variables:
+          BUCKET: !Sub smh-poc-artifacts-${AWS::AccountId}
+          DOCUMENT: !Ref StepDocument
+          CFN_ROLE: !GetAtt HelperStackRole.Arn
+          TAGS: !FindInMap [Tags, Six, Json]
+
+  # ---------- CloudFormation's own role for the GPU helper stack ----------
+  HelperStackRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: smh-poc-deployer-helper-stack-role
+      Path: /zl/
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: cloudformation.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition: {StringEquals: {"aws:SourceAccount": !Ref "AWS::AccountId"}}
+      Policies:
+        - PolicyName: smh-poc-deployer-helper-stack
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [ec2:Describe*, ssm:GetParameters]
+                Resource: "*"
+              - Sid: OneOfFourGpuTypes
+                Effect: Allow
+                Action: ec2:RunInstances
+                Resource: !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+                Condition:
+                  StringEquals: {"ec2:InstanceType": [g5.xlarge, g6.xlarge, g5.2xlarge, g6e.xlarge], "aws:RequestTag/app": Secure-model-hosting}
+              - Effect: Allow
+                Action: ec2:RunInstances
+                Resource:
+                  - !Sub arn:aws:ec2:${AWS::Region}::image/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:volume/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:subnet/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*
+              - Effect: Allow
+                Action: ec2:CreateTags
+                Resource: "*"
+                Condition: {StringEquals: {"ec2:CreateAction": RunInstances}}
+              - Effect: Allow
+                Action: ec2:TerminateInstances
+                Resource: "*"
+                Condition:
+                  StringEquals: {"aws:ResourceTag/app": Secure-model-hosting, "aws:ResourceTag/owner": owner@example.com}
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: !ImportValue smh-poc-builder-role-arn
+                Condition: {StringEquals: {"iam:PassedToService": ec2.amazonaws.com}}
+
+  # ---------- what the builder machine may do for the fixed steps ----------
+  BuilderSteps:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: smh-poc-builder-deployer-steps
+      Roles: [smh-poc-builder-role]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: RegisterAnImageFromItsOwnDisk
+            Effect: Allow
+            Action: [ec2:CreateVolume, ec2:CreateSnapshot, ec2:RegisterImage, ec2:CreateTags, ec2:Describe*]
+            Resource: "*"
+          - Effect: Allow
+            Action: [ec2:AttachVolume, ec2:DetachVolume, ec2:DeleteVolume]
+            Resource: "*"
+            Condition:
+              StringEquals: {"aws:ResourceTag/app": Secure-model-hosting, "aws:ResourceTag/owner": owner@example.com}
+          - Sid: PinTheTwoKeyStacksWithTheSameTemplate
+            Effect: Allow
+            Action: [cloudformation:UpdateStack, cloudformation:DescribeStacks]
+            Resource:
+              - !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/smh-poc-m1-key/*
+              - !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/smh-poc-m1-lease/*
+          - Sid: ReadOnlyForTheStaticChecks
+            Effect: Allow
+            Action: [iam:ListRolePolicies, iam:GetRolePolicy, iam:ListAttachedRolePolicies]
+            Resource:
+              - !Sub arn:aws:iam::${AWS::AccountId}:role/zl/smh-poc-sealed-instance-role
+              - !Sub arn:aws:iam::${AWS::AccountId}:role/zl/smh-poc-builder-role
+          - Effect: Allow
+            Action: [iam:ListRolePolicies, iam:GetRolePolicy, iam:ListAttachedRolePolicies]
+            Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/zl/smh-poc-deployer-*
+          - Effect: Allow
+            Action: iam:ListRoles
+            Resource: "*"
+          - Effect: Allow
+            Action: s3:GetBucketPublicAccessBlock
+            Resource: !Sub arn:aws:s3:::smh-poc-artifacts-${AWS::AccountId}
+          - Sid: OnlyAHumanApproves
+            Effect: Deny
+            Action: [s3:PutObject, s3:DeleteObject]
+            Resource: !Sub arn:aws:s3:::smh-poc-artifacts-${AWS::AccountId}/approvals/*
+
+  # ---------- AgentCore's two roles ----------
+  GatewayRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: smh-poc-deployer-gateway-role
+      Path: /zl/
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: bedrock-agentcore.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition: {StringEquals: {"aws:SourceAccount": !Ref "AWS::AccountId"}}
+      Policies:
+        - PolicyName: smh-poc-deployer-gateway
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - {Effect: Allow, Action: lambda:InvokeFunction, Resource: !GetAtt Tools.Arn}
+  AgentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: smh-poc-deployer-agent-role
+      Path: /zl/
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: bedrock-agentcore.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition: {StringEquals: {"aws:SourceAccount": !Ref "AWS::AccountId"}}
+      Policies:
+        - PolicyName: smh-poc-deployer-agent
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ThinkWithOneModel
+                Effect: Allow
+                Action: [bedrock:InvokeModel, bedrock:InvokeModelWithResponseStream]
+                Resource: [!Ref ModelArn, !Ref FoundationModelArn]
+              - Sid: CallOurGatewayAndNothingElse
+                Effect: Allow
+                Action: bedrock-agentcore:InvokeGateway
+                Resource: !Sub arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:gateway/smh-poc-deployer-*
+              - Sid: ItsOwnLogs
+                Effect: Allow
+                Action: [logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents, logs:DescribeLogStreams]
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/*
+
+Outputs:
+  ToolsArn: {Value: !GetAtt Tools.Arn}
+  GatewayRoleArn: {Value: !GetAtt GatewayRole.Arn}
+  AgentRoleArn: {Value: !GetAtt AgentRole.Arn}
+  ToolsRoleArn: {Value: !GetAtt ToolsRole.Arn}

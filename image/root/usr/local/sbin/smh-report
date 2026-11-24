@@ -1,0 +1,92 @@
+#!/bin/bash
+# After the loader: show that the door is shut and what is running.
+# Prints facts only, no secrets. The one model answer shown is to a fixed test prompt.
+set -uo pipefail
+export TPM2TOOLS_TCTI=device:/dev/tpmrm0
+say() { echo "SMH REPORT $*"; }
+cfg() { python3 -c "import json,sys; print(json.load(open('/etc/smh/$1'))['$2'])"; }
+REGION=$(cfg loader.json region); PREFIX=$(cfg loader.json prefix)
+BUCKET=$(cfg manifest.json bucket); KEY_ARN=$(cfg manifest.json key_arn)
+W=$(mktemp -d -p /run); trap 'rm -rf "$W"' EXIT
+read -r BUCKET PREFIX < <(PYTHONPATH=/usr/local/lib/smh python3 -c "
+from sealbox import loader
+try: print(*loader.model_source('$BUCKET', '$PREFIX', loader.read_source()))
+except loader.LoaderError: print('$BUCKET', '$PREFIX')")
+
+tpm2_pcrread sha384:15 2>&1 | sed 's/^/SMH PCR[after] /'
+
+# 1. A second key request from the host, after the lock. Must be refused.
+priv=$(openssl genrsa 2048 2>/dev/null)
+doc=$(nitro-tpm-attest --public-key <(openssl rsa -pubout -outform DER <<<"$priv" 2>/dev/null) | base64 -w0)
+if aws s3 cp --only-show-errors --region "$REGION" "s3://$BUCKET/$PREFIX/wrapped.key" "$W/wrapped.key" 2>/dev/null &&
+   aws kms decrypt --region "$REGION" --key-id "$KEY_ARN" --ciphertext-blob "fileb://$W/wrapped.key" \
+       --recipient "KeyEncryptionAlgorithm=RSAES_OAEP_SHA_256,AttestationDocument=$doc" \
+       --query KeyId --output text >/dev/null 2>"$W/err"; then
+    say "second_key_request=RELEASED (BAD)"
+else
+    say "second_key_request=REFUSED $(grep -o '[A-Za-z]*Exception' "$W/err" 2>/dev/null | head -1)"
+fi
+
+# 2. What listens on the network, and the scratch disk.
+say "listening=$(ss -Hlntu | awk '{print $1":"$5}' | sort -u | tr '\n' ' ')"
+say "scratch_disk=$(cryptsetup status smh-scratch 2>/dev/null | awk '/type:|cipher:|keysize:|device:/{printf "%s%s ", $1, $2}') mounts=$(findmnt -n -o SOURCE /var/lib/docker | head -1)"
+say "key_files_on_any_disk=$(find / -xdev \( -name '*.key' -o -name 'wrapped.key' \) -not -path '/proc/*' -not -path '/usr/share/*' -not -path '/etc/pki/*' 2>/dev/null | wc -l)"
+
+# 3. Containers: running, and what each can reach.
+say "containers=$(docker ps -a --format '{{.Names}}({{.Status}})' | tr '\n' ' ')"
+for name in $(docker ps --format '{{.Names}}'); do
+    S3IP=$(getent hosts "s3.$REGION.amazonaws.com" | awk '{print $1}' | head -1); GW=$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null)
+    say "inside[$name]=$(docker exec -e ENDPOINT="${S3IP:-52.216.0.1}" -e GATEWAY="${GW:-172.17.0.1}" "$name" python3 -c '
+import os, urllib.request
+out = ["uid=%d" % os.getuid()]
+out.append("tpm=" + ("VISIBLE" if any(os.path.exists(p) for p in ("/dev/tpm0", "/dev/tpmrm0")) else "absent"))
+try:
+    open("/probe", "w"); out.append("rootfs=WRITABLE")
+except OSError:
+    out.append("rootfs=read-only")
+try:
+    req = urllib.request.Request("http://169.254.169.254/latest/api/token", method="PUT",
+                                 headers={"X-aws-ec2-metadata-token-ttl-seconds": "60"})
+    urllib.request.urlopen(req, timeout=3); out.append("instance_credentials=REACHABLE")
+except Exception:
+    out.append("instance_credentials=unreachable")
+caps = [l.split()[1] for l in open("/proc/self/status") if l.startswith("CapEff")]
+out.append("capabilities=" + caps[0])
+import socket
+blocked = []
+for host, port in ((os.environ["ENDPOINT"], 443), ("169.254.169.254", 80), (os.environ["GATEWAY"], 22)):
+    try:
+        socket.create_connection((host, port), timeout=3).close(); blocked.append("OPEN:%s:%d" % (host, port))
+    except OSError:
+        pass
+out.append("outbound=" + (",".join(blocked) or "blocked"))
+out.append("model_dir=" + ",".join(sorted(os.listdir("/model"))) if os.path.isdir("/model") else "model_dir=none")
+print(" ".join(out))' 2>&1 | tr '\n' ' ' | head -c 520)"
+done
+for name in $(docker ps -a --filter status=exited --format '{{.Names}}'); do
+    docker logs "$name" 2>&1 | grep -vE '^\s*$' | tail -12 | cut -c1-220 | sed "s/^/SMH REPORT exited[$name] /"
+done
+
+# 4. The model server, if one is up: GPU use, one fixed test prompt, and the
+#    per-token probability setting.
+if curl -sf -m 3 http://127.0.0.1:8000/health >/dev/null 2>&1 && curl -sf -m 3 http://127.0.0.1:8000/v1/models >/dev/null 2>&1; then
+    say "gpu_memory_used=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader 2>&1 | head -1)"
+    S=$(date +%s.%N)
+    curl -s -m 60 http://127.0.0.1:8000/v1/completions -H 'Content-Type: application/json' \
+        -d '{"model":"demo","prompt":"The capital of France is","max_tokens":48,"temperature":0}' > "$W/a.json"
+    python3 -m sealbox.meter own 1 2>/dev/null || true   # this was the machine's own request, not the customer's
+    E=$(date +%s.%N)
+    python3 - "$W/a.json" "$S" "$E" <<'PY'
+import json, sys
+try:
+    r = json.load(open(sys.argv[1])); n = r["usage"]["completion_tokens"]
+    print("SMH REPORT answer=%r tokens=%d tokens_per_second=%.1f" % (r["choices"][0]["text"][:90], n, n / (float(sys.argv[3]) - float(sys.argv[2]))))
+except Exception as e:
+    print("SMH REPORT answer=FAILED", str(e)[:80], open(sys.argv[1]).read()[:160].replace("\n", " "))
+PY
+    code=$(curl -s -m 30 -o "$W/l.json" -w '%{http_code}' http://127.0.0.1:8000/v1/completions -H 'Content-Type: application/json' \
+        -d '{"model":"demo","prompt":"Hi","max_tokens":2,"logprobs":5}')
+    say "logprobs_request=http_$code $(head -c 140 "$W/l.json" | tr '\n' ' ')"
+elif curl -sf -m 3 http://127.0.0.1:8000/ >/dev/null 2>&1; then
+    say "answer=$(curl -s -m 5 http://127.0.0.1:8000/ | head -c 120)"
+fi

@@ -1,0 +1,21 @@
+[Unit]
+Description=smh-poc lease: renew the permission to serve; cut off when it is withdrawn
+# Ordering only, on purpose: the lease must run even when the loader reports a
+# failure, so a half-started machine can never serve without a lease.
+After=smh-loader.service
+ConditionPathExists=/etc/smh/lease-enabled
+# If this service cannot stay up, the machine must not keep serving without it.
+StartLimitIntervalSec=900
+StartLimitBurst=5
+StartLimitAction=poweroff
+
+[Service]
+Environment=PYTHONPATH=/usr/local/lib/smh
+ExecStart=/usr/bin/python3 -m sealbox.lease
+Restart=always
+RestartSec=20
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

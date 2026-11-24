@@ -1,0 +1,32 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  smh-poc M1 builder machine. Builds the sealed image. No GPU. No inbound
+  access: reached only through Session Manager. Tags come from the stack tags.
+
+Parameters:
+  Ami:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+Resources:
+  Builder:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref Ami
+      InstanceType: c6i.2xlarge
+      IamInstanceProfile: smh-poc-builder-profile
+      PropagateTagsToVolumeOnCreation: true
+      MetadataOptions: {HttpTokens: required, HttpPutResponseHopLimit: 1}
+      NetworkInterfaces:
+        - DeviceIndex: "0"
+          SubnetId: !ImportValue smh-poc-builder-subnet-id
+          GroupSet: [!ImportValue smh-poc-builder-sg-id]
+          AssociatePublicIpAddress: true   # outbound only: the security group has no inbound rules
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs: {VolumeSize: 100, VolumeType: gp3, Encrypted: true, DeleteOnTermination: true}
+      Tags: [{Key: Name, Value: smh-poc-builder}]
+
+Outputs:
+  InstanceId: {Value: !Ref Builder}
+  Az: {Value: !GetAtt Builder.AvailabilityZone}

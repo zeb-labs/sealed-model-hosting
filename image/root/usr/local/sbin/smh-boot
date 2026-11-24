@@ -1,0 +1,70 @@
+#!/bin/bash
+# Boot entry point: load the GPU driver, wait for network and role
+# credentials, run the loader, then always print the report.
+set -uo pipefail
+export PYTHONPATH=/usr/local/lib/smh TPM2TOOLS_TCTI=device:/dev/tpmrm0
+cfg() { python3 -c "import json,sys; print(json.load(open('/etc/smh/$1'))['$2'])"; }
+REGION=$(cfg loader.json region); PREFIX=$(cfg loader.json prefix); BUCKET=$(cfg manifest.json bucket)
+cfg_weights_port() { python3 -c "import json; print(json.load(open('/etc/smh/loader.json')).get('weights', {}).get('port', 8765))"; }
+
+echo "SMH BOOT image=$(. /etc/os-release; echo "$PRETTY_NAME") kernel=$(uname -r) list=$(python3 -c "import json;from sealbox import manifest;print(manifest.digest(json.load(open('/etc/smh/manifest.json')))[:16])")"
+echo "SMH BOOT secure_boot=$(od -An -tu1 -j4 -N1 /sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c 2>/dev/null | tr -d ' ') module_sig_enforce=$(cat /sys/module/module/parameters/sig_enforce 2>/dev/null) ram_mib=$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo)"
+
+if [ -e "/lib/modules/$(uname -r)/extra/nvidia/nvidia.ko" ]; then
+    if out=$(modprobe nvidia 2>&1) && modprobe nvidia_uvm 2>&1 && nvidia-modprobe -u -c 0; then
+        echo "SMH GPU driver loaded, signed by: $(modinfo -F signer nvidia)"
+        echo "SMH GPU $(nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader 2>&1 | head -1)"
+    else
+        echo "SMH GPU driver FAILED to load: $(echo "$out" | tr '\n' ' ' | cut -c1-160); $(dmesg | grep -iE 'nvidia|module verification|Loading of' | tail -2 | tr '\n' ' ' | cut -c1-200)"
+    fi
+fi
+
+# Where the encrypted release comes from: the instance tag smh-model-source if
+# the customer set one, else the builder's bucket named in the image. The tag
+# is not trusted; every file fetched is verified against the image.
+TOK=$(curl -s -m 3 -X PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' || true)
+curl -s -f -m 3 -H "X-aws-ec2-metadata-token: $TOK" http://169.254.169.254/latest/meta-data/tags/instance/smh-model-source > /run/smh-source 2>/dev/null || : > /run/smh-source
+chmod 0600 /run/smh-source
+read -r BUCKET PREFIX < <(python3 -c "
+from sealbox import loader
+try: print(*loader.model_source('$BUCKET', '$PREFIX', loader.read_source()))
+except loader.LoaderError: print('$BUCKET', '$PREFIX')")
+
+# The model container may talk to nothing but the weights proxy on this host.
+# If a bug in the model server ever gave someone code execution in it, they
+# could not open a connection out. No rules, no start.
+if iptables -I DOCKER-USER -i docker0 ! -o docker0 -j DROP &&
+   iptables -I INPUT -i docker0 -j DROP &&
+   iptables -I INPUT -i docker0 -p tcp --dport "$(cfg_weights_port)" -j ACCEPT &&
+   iptables -I INPUT -i docker0 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT; then
+    echo "SMH BOOT container firewall set: no outbound from containers"
+else
+    echo "SMH BOOT container firewall FAILED: not starting the loader"
+    echo "SMH DONE loader_exit=1"; ( systemd-run --quiet --on-active=90 systemctl poweroff ) || true
+    exit 1
+fi
+
+for _ in $(seq 1 30); do
+    aws s3api head-object --region "$REGION" --bucket "$BUCKET" --key "$PREFIX/wrapped.key" >/dev/null 2>&1 && break
+    sleep 5
+done
+tpm2_pcrread sha384:4,7,12,15 2>&1 | sed 's/^/SMH PCR[boot] /'
+
+# Track the lowest free RAM while the model loads.
+BASE=$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo); echo "$BASE" > /run/smh-ram-min
+( while :; do a=$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo); [ "$a" -lt "$(cat /run/smh-ram-min)" ] && echo "$a" > /run/smh-ram-min; sleep 1; done ) &
+SAMPLER=$!
+T0=$(date +%s)
+python3 -m sealbox.loader; rc=$?
+kill $SAMPLER 2>/dev/null
+echo "SMH RAM available before load: ${BASE} MiB; lowest during load: $(cat /run/smh-ram-min) MiB; peak extra use: $((BASE - $(cat /run/smh-ram-min))) MiB; loader took $(( $(date +%s) - T0 )) s"
+/usr/local/sbin/smh-report || true
+echo "SMH DONE loader_exit=$rc"
+if [ "$rc" != 0 ]; then
+    # No model came up (wrong archive, tampered weights, refused key). There is
+    # nothing to serve, so do not leave the customer paying for an idle GPU.
+    echo "SMH BOOT no model: powering off in 90 seconds"
+    # A timer of its own: a background job of this script would be killed when the script's service ends.
+    systemd-run --quiet --on-active=90 --unit=smh-no-model-poweroff systemctl poweroff
+fi
+exit $rc   # the job runner starts only if the loader succeeded

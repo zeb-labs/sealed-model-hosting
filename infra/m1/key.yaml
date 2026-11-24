@@ -1,0 +1,101 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  smh-poc M1 model key. Nobody can Decrypt except the sealed instance role, and
+  only when its NitroTPM attestation document carries the pinned PCR values.
+  The only other release is to one onboarded customer role, with the same
+  PCR values (M10). No statement lets IAM grant Decrypt to anyone else.
+  Tags come from the stack tags (see deploy.sh).
+
+Parameters:
+  AdminUserArn:
+    Type: String
+  # "UNSET" never matches a real PCR, so the key releases nothing until the
+  # image is built and deploy.sh is re-run with the real values.
+  # The lease key is a second stack from this template: Alias=smh-poc-lease-key
+  # and Pcr15 = the LOCKED value (the model key pins the OPEN value).
+  Alias: {Type: String, Default: smh-poc-model-key}
+  Pcr4: {Type: String, Default: UNSET}
+  Pcr7: {Type: String, Default: UNSET}
+  Pcr12: {Type: String, Default: UNSET}
+  # Runtime PCR ("door lock"). Empty = not pinned.
+  Pcr15: {Type: String, Default: ""}
+  # M10: one onboarded customer's machine role (full ARN). Empty = nobody else.
+  CustomerRoleArn: {Type: String, Default: ""}
+
+Conditions:
+  PinRuntime: !Not [!Equals [!Ref Pcr15, ""]]
+  HasCustomer: !Not [!Equals [!Ref CustomerRoleArn, ""]]
+
+Resources:
+  ModelKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub ${Alias}. Released only to the attested sealed image.
+      PendingWindowInDays: 7
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AdminAndEncryptNoDecrypt
+            Effect: Allow
+            Principal:
+              AWS:
+                - !Ref AdminUserArn
+                - !ImportValue smh-poc-builder-role-arn
+            Action:
+              - kms:Describe*
+              - kms:Get*
+              - kms:List*
+              - kms:PutKeyPolicy
+              - kms:EnableKey
+              - kms:DisableKey
+              - kms:TagResource
+              - kms:UntagResource
+              - kms:UpdateKeyDescription
+              - kms:ScheduleKeyDeletion
+              - kms:CancelKeyDeletion
+              - kms:GenerateDataKey
+              - kms:Encrypt
+            Resource: "*"
+          - Sid: AliasManagement
+            Effect: Allow
+            Principal: {AWS: !Ref AdminUserArn}
+            Action: [kms:CreateAlias, kms:UpdateAlias, kms:DeleteAlias]
+            Resource: "*"
+          - Sid: ReleaseToSealedImageOnly
+            Effect: Allow
+            Principal: {AWS: !ImportValue smh-poc-sealed-role-arn}
+            Action: kms:Decrypt
+            Resource: "*"
+            Condition:
+              StringEqualsIgnoreCase:
+                kms:RecipientAttestation:NitroTPMPCR4: !Ref Pcr4
+                kms:RecipientAttestation:NitroTPMPCR7: !Ref Pcr7
+                kms:RecipientAttestation:NitroTPMPCR12: !Ref Pcr12
+                kms:RecipientAttestation:NitroTPMPCR15: !If [PinRuntime, !Ref Pcr15, !Ref "AWS::NoValue"]
+          # M10: an onboarded customer's machine role. Named by a condition, so it
+          # can be written before the customer has created the role. The same
+          # measurements are required; the role alone gets nothing. The role
+          # must also allow kms:Decrypt in its own policy (the customer's template does).
+          - !If
+            - HasCustomer
+            - Sid: ReleaseToOnboardedCustomerRole
+              Effect: Allow
+              Principal: {AWS: !Join ["", [!Select [0, !Split [":role/", !Ref CustomerRoleArn]], ":root"]]}
+              Action: kms:Decrypt
+              Resource: "*"
+              Condition:
+                ArnEquals: {"aws:PrincipalArn": !Ref CustomerRoleArn}
+                StringEqualsIgnoreCase:
+                  kms:RecipientAttestation:NitroTPMPCR4: !Ref Pcr4
+                  kms:RecipientAttestation:NitroTPMPCR7: !Ref Pcr7
+                  kms:RecipientAttestation:NitroTPMPCR12: !Ref Pcr12
+                  kms:RecipientAttestation:NitroTPMPCR15: !If [PinRuntime, !Ref Pcr15, !Ref "AWS::NoValue"]
+            - !Ref "AWS::NoValue"
+  ModelKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub alias/${Alias}
+      TargetKeyId: !Ref ModelKey
+
+Outputs:
+  KeyArn: {Value: !GetAtt ModelKey.Arn}
