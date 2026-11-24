@@ -28,11 +28,13 @@ if [[ "$MODEL" == local/* ]]; then
   [ -s $D/own/config.json ] || { echo "MODEL PROBLEM: the model folder has no config.json (it must be a Hugging Face style folder)"; exit 1; }
   ls $D/own/*.safetensors >/dev/null 2>&1 || { echo "MODEL PROBLEM: the model folder has no .safetensors weight files"; exit 1; }
   cp -rL $D/own/. $D/base/ && chmod -R a+rX $D/base
-  # The conversion step looks a model up by name in the local Hugging Face cache. Put the folder there under its
-  # name and switch the network lookups off, so the builder's own model is handled exactly like a downloaded one.
+  # The conversion step looks a model up BY NAME (it refuses a folder path, and with the offline switch on it turns
+  # the name into a path and refuses that too: both seen on 24 Nov). So the folder is put in the local Hugging Face
+  # cache under its name and the lookups stay on: the name is not on Hugging Face, the lookup fails, and the
+  # library falls back to the cached copy. Nothing is sent anywhere; the name is all that is asked for.
   H=$(printf '%s' "$MODEL" | sha1sum | cut -c1-40); C="$D/hf/hub/models--${MODEL//\//--}"
   rm -rf "$C"; mkdir -p "$C/refs" "$C/snapshots/$H"; cp -rL $D/own/. "$C/snapshots/$H/"; printf '%s' "$H" > "$C/refs/main"; chmod -R a+rX "$C"
-  OFFLINE="-e HF_HUB_OFFLINE=1 -e TRANSFORMERS_OFFLINE=1"
+  OFFLINE="-e HF_HUB_DISABLE_TELEMETRY=1"
 else
   docker run --rm --entrypoint python3 -v $D/hf:/root/.cache/huggingface smh/model-server:latest \
     -c "from huggingface_hub import snapshot_download; snapshot_download('$MODEL')" > $D/download.log 2>&1 \

@@ -240,7 +240,7 @@ footer{padding-block:26px 34px;font-size:13px;color:var(--d-muted);border-top:1p
       <div class="gcol"><h3>Keys and proof</h3><dl><dt>AWS KMS</dt><dd>Amazon's key service. It holds master keys that never leave it. You can only ask it to do something with a key, and it checks a written rule (the key policy) before it does.</dd><dt>Model key</dt><dd>A master key in KMS, in the builder's account. It is the only thing that can unwrap the model's data key. Its rule: release only to our exact machine image, and only once per boot.</dd><dt>Data key</dt><dd>The 256-bit key that actually encrypts the model. KMS creates it. It exists in readable form only for a moment: in the build pipeline while encrypting, and in the sealed machine's memory while loading.</dd><dt>Wrapped key</dt><dd>The data key, encrypted by the model key. A 184-byte file stored next to the model, in both buckets. Useless to anyone who cannot get KMS to unwrap it.</dd><dt>Lease and lease key</dt><dd>A lease is a short permit to keep serving. The lease key is a second master key in KMS used only for that: every minute the machine must get KMS to use it. If the builder disables the key, the permit runs out and the machine stops.</dd><dt>Attestation document</dt><dd>A proof of what a machine booted, signed by AWS hardware. It lists the machine's boot fingerprints. KMS reads it and compares it with the key's rule.</dd><dt>Measurement (PCR)</dt><dd>A fingerprint of something that ran during boot, recorded in the machine's TPM. A record can be added to but never rewritten. We use four: the boot file, the Secure Boot state, extra boot settings, and one of our own.</dd><dt>Open state, locked state</dt><dd>Two values of our own fingerprint. Open: the machine has checked its containers and may ask for the model key. Locked: it has asked once, and can never ask again on this boot. The lease key works only in the locked state.</dd></dl></div>
       <div class="gcol"><h3>The machine</h3><dl><dt>Sealed image</dt><dd>The disk image the machine boots from. It has no login of any kind, its disk is read-only and verified block by block, and it does one fixed job at boot.</dd><dt>Secure Boot</dt><dd>A firmware check that refuses to start a boot file that is not signed with the builder's key.</dd><dt>NitroTPM</dt><dd>A security component AWS gives each machine. It stores the boot fingerprints and produces the signed proof.</dd><dt>Loader</dt><dd>The first program of ours that runs. It checks the containers, proves the boot to KMS, receives the key once, and locks.</dd><dt>Decrypting proxy</dt><dd>A small program inside the machine. It fetches encrypted pieces of the model, checks and decrypts each one in memory, and hands them to the model server.</dd><dt>Encrypted local disk</dt><dd>A fast disk inside the machine used for the large container and for training. It is encrypted with a random key that exists only in memory, so its contents are unreadable after power-off.</dd><dt>Front gate</dt><dd>A small web server at the machine's only open port (HTTPS, port 443). It asks for an API key and lets the customer's app reach four addresses of the model server and nothing else.</dd><dt>API key</dt><dd>A password for the endpoint. The customer writes their keys in a file in their own bucket; the machine reads it every 30 seconds. No valid key, no answer.</dd><dt>Container firewall</dt><dd>Rules set at boot that stop the model server's container from opening any connection out. It can only fetch the weights from the proxy on the same machine.</dd><dt>Launch tags</dt><dd>Labels the customer's template puts on the machine. Three of them name the customer's bucket, key, and log group, so one image can serve many customers. They are not trusted and open nothing.</dd><dt>Private subnet, endpoint</dt><dd>The machine sits in a network with no route to the internet. It can reach exactly three AWS services through private doors called endpoints: storage, KMS, and logs.</dd></dl></div>
       <div class="gcol"><h3>The model</h3><dl><dt>Weights</dt><dd>The numbers that are the model. They are what the builder must protect.</dd><dt>vLLM</dt><dd>The open-source program that serves the model on the GPU. We run it unmodified.</dd><dt>Tensorizer format</dt><dd>A way of laying out the weights in a file so they can be read piece by piece straight into GPU memory.</dd><dt>Chunk</dt><dd>One 8 MiB piece of an encrypted file. Each chunk is encrypted separately and carries its own tamper check.</dd><dt>Tamper check</dt><dd>A 16-byte code on every chunk (AES-256-GCM). If a chunk is changed, swapped, dropped, or cut short, the check fails and the machine refuses it.</dd><dt>Fine-tuning, adapter</dt><dd>Fine-tuning teaches the model from the customer's examples. The result is a small add-on file called an adapter (LoRA). The base weights do not change.</dd></dl></div>
-      <div class="gcol"><h3>Running and control</h3><dl><dt>Deployer agent</dt><dd>An AI agent that runs the builder's release steps in order by calling fixed tools. It cannot approve a release, write a key rule, or read a secret.</dd><dt>Onboarding</dt><dd>The builder adds one statement to both key rules for one customer's machine role. The measurements are still required. Removing the statement cuts that customer off.</dd><dt>Approval</dt><dd>A record that a human approved one exact build. The keys cannot be tied to an image without it.</dd><dt>Job runner, trainer</dt><dd>The job runner picks up fine-tuning jobs from the customer's bucket and checks the form. The trainer does the training with no network and no credentials.</dd><dt>Usage meter, usage record</dt><dd>The meter counts requests and tokens. Every two minutes it writes a small record of those counts, with a seal, into the customer's bucket.</dd><dt>Seal</dt><dd>A keyed fingerprint (HMAC) on each usage record. The builder can tell if a record was changed; missing numbers in the sequence show if one was removed.</dd><dt>Log shipper</dt><dd>Sends the machine's own log to the customer's log store. It never sends what the trainer prints.</dd><dt>Cut-off</dt><dd>The builder disables the keys. The machine's next lease renewals fail, it stops serving, and it powers off.</dd></dl></div>
+      <div class="gcol"><h3>Running and control</h3><dl><dt>Deployer agent</dt><dd>An AI agent that runs the builder's release steps in order by calling fixed tools. It cannot approve a release, write a key rule, or read a secret.</dd><dt>Remediation agent</dt><dd>An AI agent called when a step fails, for the builder or the customer. It looks into the failure with read-only tools, applies a fix from a short fixed list, or tells the person exactly what to do. It cannot run commands.</dd><dt>Onboarding</dt><dd>The builder adds one statement to both key rules for one customer's machine role. The measurements are still required. Removing the statement cuts that customer off.</dd><dt>Approval</dt><dd>A record that a human approved one exact build. The keys cannot be tied to an image without it.</dd><dt>Job runner, trainer</dt><dd>The job runner picks up fine-tuning jobs from the customer's bucket and checks the form. The trainer does the training with no network and no credentials.</dd><dt>Usage meter, usage record</dt><dd>The meter counts requests and tokens. Every two minutes it writes a small record of those counts, with a seal, into the customer's bucket.</dd><dt>Seal</dt><dd>A keyed fingerprint (HMAC) on each usage record. The builder can tell if a record was changed; missing numbers in the sequence show if one was removed.</dd><dt>Log shipper</dt><dd>Sends the machine's own log to the customer's log store. It never sends what the trainer prints.</dd><dt>Cut-off</dt><dd>The builder disables the keys. The machine's next lease renewals fail, it stops serving, and it powers off.</dd></dl></div>
     </div>
   </div>
 </section>
@@ -291,6 +291,64 @@ footer{padding-block:26px 34px;font-size:13px;color:var(--d-muted);border-top:1p
   </div>
 </section>
 
+<section class="dark" id="changes">
+  <div class="wrap">
+    <div class="head">
+      <p class="overline">Original and ours</p>
+      <h2>What we kept from the AWS sample, what we changed, what we added</h2>
+      <p class="lede">The starting point is the AWS sample <code>sample-guarded-user-controlled-attested-runtime-deployment</code> (commit <code>b82acf7</code>). The full item-by-item list is in <code>docs/changes-vs-original.md</code> in the repository.</p>
+    </div>
+    <div class="cols">
+      <div class="card">
+        <h3>Kept, unchanged</h3>
+        <ul>
+          <li>The core idea: KMS releases the key only to an EC2 instance whose NitroTPM attestation document shows it booted one exact sealed image.</li>
+          <li>A sealed Amazon Linux 2023 image built with KIWI: a signed boot file and a read-only, verified disk.</li>
+          <li>vLLM as the model server.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Changed: gaps closed</h3>
+        <ul>
+          <li>No way in. The sample image installs a remote-login agent and runs a web terminal with no login next to the model. Ours has no login of any kind and one HTTPS port that needs an API key.</li>
+          <li>No remote command channel into the machine or the model's container.</li>
+          <li>Four measurements pinned in the key policy instead of two, with Secure Boot and our own keys.</li>
+          <li>One key release per boot, then the machine locks itself.</li>
+          <li>Containers and model files verified before any key is requested.</li>
+          <li>Tamper-checked encryption in chunks; the model streams to the GPU, so its size is not capped by machine memory.</li>
+          <li>Logs stay with the customer; the builder sees usage counts only.</li>
+          <li>Measurements written to the key policy by the pipeline, not by hand.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Added</h3>
+        <ul>
+          <li>Fine-tuning on the customer's private data: a form and data, never code.</li>
+          <li>Revocation: a lease renewed every minute, per customer.</li>
+          <li>One image for many customers.</li>
+          <li>Two commands instead of eleven manual steps: one for the builder, one for the customer.</li>
+          <li>Any open model by name, or the builder's own weights from a folder, a network share, or S3.</li>
+          <li>A remediation agent on both sides (see below).</li>
+          <li>A suite of 33 tests, eight of them attacks, and a cost guard.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="cols" style="margin-top:22px">
+      <div class="card" style="grid-column:1/-1">
+        <h3>The remediation agent: it watches every run, for builder and customer</h3>
+        <p style="margin:0;font-size:15px;color:var(--d-muted)">Each side runs one command. When any step of it fails, an AI agent is called with the step's output. It is the same agent on both sides; only the list of fixes it may choose differs.</p>
+        <ul>
+          <li><b>It investigates</b> with tools that can only read: why a stack failed, what the sealed machine logged, what the keys are tied to, what the person's AWS user is allowed to do, account limits, and facts about the model.</li>
+          <li><b>It fixes what is safe.</b> It picks one fix from a short fixed list (wait and retry, try another machine type, remove its own half-made stack, restart the machine, make a new API key, give a customer access) and the step runs again.</li>
+          <li><b>It tells the person exactly what to do</b> for everything else, in numbered steps, and continues from the same step once that is done. Examples: a missing permission (with the exact actions to request), an account limit, a model that cannot be released.</li>
+          <li><b>What keeps it safe:</b> it cannot run commands, it never proposes switching a protection off, a fix that its side may not do becomes a request to a person, and every case is saved for review.</li>
+          <li><b>Seen in real runs:</b> a customer with no access to the keys, a gated model on the builder's side, no free GPU capacity (it waited and retried by itself), and a fine-tune job over the builder's limits.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section class="dark">
   <div class="wrap">
     <div class="head">
@@ -310,7 +368,7 @@ footer{padding-block:26px 34px;font-size:13px;color:var(--d-muted);border-top:1p
         <h3>Shown by running it</h3>
         <ul>
           <li>The key goes only to the exact image: seven attack boots ended with no key or no model, and our own admin user was refused the key.</li>
-          <li>No way in: no login prompt, one open port (HTTPS), and no answer without the customer's API key. Given a role and network path for AWS remote management, the machine still never registered.</li><li>The machine loaded the model from the customer's own bucket. The model server's container could open no outbound connection, and serving and fine-tuning still worked.</li><li>Asked to hibernate (save memory to disk) while holding the key, the machine wrote no memory image.</li><li>One-click setup: one stack brought up a second, separate customer on the same image. Its logs, usage records, and adapters went to its own bucket and log group. One command fine-tuned and served an adapter. After a restart the same endpoint name answered.</li><li>Removing one customer from the key rules stopped that customer's machine within four minutes.</li><li>Two commands do the whole job: one for the builder (release, approval, keys, customer access; about an hour, one question at the start) and one for the customer (network, machine, API key, test call; about 25 minutes). Both were run on real machines.</li>
+          <li>No way in: no login prompt, one open port (HTTPS), and no answer without the customer's API key. Given a role and network path for AWS remote management, the machine still never registered.</li><li>The machine loaded the model from the customer's own bucket. The model server's container could open no outbound connection, and serving and fine-tuning still worked.</li><li>Asked to hibernate (save memory to disk) while holding the key, the machine wrote no memory image.</li><li>One-click setup: one stack brought up a second, separate customer on the same image. Its logs, usage records, and adapters went to its own bucket and log group. One command fine-tuned and served an adapter. After a restart the same endpoint name answered.</li><li>Removing one customer from the key rules stopped that customer's machine within four minutes.</li><li>A remediation agent watched those runs on both sides and handled four real failures: it explained three to a person and fixed one by itself.</li><li>Two commands do the whole job: one for the builder (release, approval, keys, customer access; about an hour, one question at the start) and one for the customer (network, machine, API key, test call; about 25 minutes). Both were run on real machines.</li>
           <li>Plain weights never touch the system disk: after serving and training it was byte-for-byte the released image.</li>
           <li>Network logs show traffic only to storage, KMS, and the customer's log.</li>
           <li>Fine-tuning takes a form and data, never code; bad forms are refused.</li>
@@ -325,7 +383,7 @@ footer{padding-block:26px 34px;font-size:13px;color:var(--d-muted);border-top:1p
           <li>The build is not reproducible yet, so a customer cannot rebuild and compare.</li>
           <li>What many adapters reveal about the base weights is not measured.</li>
           <li>A person does not read each release before it is approved. The builder agrees once at the start, and the release is approved only when its six automatic checks pass. A stricter mode, where a person types the approval after reading the summary, exists; it has not been shown with a person. Approver credentials must be separate from all automation.</li>
-          <li>Secure Boot uses test keys. One small open model on one GPU.</li><li>The endpoint's certificate is made fresh at each boot and is self-signed; the app pins its fingerprint from the log. There is no stable endpoint name yet.</li><li>A bug in the model server could still be used from inside its container; the firewall closes only the network way out.</li>
+          <li>Secure Boot uses test keys. One small open model on one GPU has gone through end to end; a second run, with the builder's own weights from a folder, is in testing.</li><li>The agent's check of a person's AWS permissions was tried on a simulated error only.</li><li>The endpoint's certificate is made fresh at each boot and is self-signed; the app pins its fingerprint from the log. There is no stable endpoint name yet.</li><li>A bug in the model server could still be used from inside its container; the firewall closes only the network way out.</li>
         </ul>
       </div>
     </div>
@@ -371,7 +429,7 @@ const STEPS = [
  {by:"Builder",p:0,t:"Prepare the model files",who:"Model builder",on:["pipeline"],e:[],
   why:"After encryption nobody can reshape the files, so they must first be in exactly the form the machine will load.",
   m:"Readable, on the builder's temporary build machine only.",k:"Does not exist yet.",st:"Does not exist yet.",
-  what:"The builder starts from the model as it was trained and produces the three things the sealed machine will need: the weights in a form that can be streamed to a GPU, a second copy for fine-tuning, and the model-server container.",
+  what:"The builder starts from the model as it was trained, either an open model named on Hugging Face or its own weights in a folder (a disk, a network share, or S3), and produces the three things the sealed machine will need: the weights in a form that can be streamed to a GPU, a second copy for fine-tuning, and the model-server container.",
   tech:["The weights are saved in the tensorizer format: a file layout that vLLM can read piece by piece straight into GPU memory. This one step needs a temporary GPU machine in the builder's account.","A second copy stays in the standard format, because the training library cannot read the first one.","The model server is the official vLLM image, pinned to one exact version by its fingerprint, plus the fine-tuning library and the builder's trainer script. It is about 26 GB.","The pipeline also counts the model's layer sizes. That fixes how large a customer's adapter is allowed to be."],
   proof:"Run: the agent did this step for five releases, in about 25 minutes each including the encryption that follows."},
  {by:"Builder",p:0,t:"Get a data key from KMS",who:"Model builder and AWS KMS",on:["pipeline","mkey"],
