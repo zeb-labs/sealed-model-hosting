@@ -3,6 +3,7 @@
 #   bash infra/cost-guard/deploy.sh            create or update
 #   bash infra/cost-guard/deploy.sh --delete   remove everything it made
 # Change the limit: LIMIT=700 STOP_AT=650 bash infra/cost-guard/deploy.sh
+# Set the at-rest cost per hour used in the estimate: FIXED=0.03 bash infra/cost-guard/deploy.sh   (0.03 = about 0.70 USD a day)
 # Move the nightly stop (UTC cron): NIGHTLY='cron(30 15 * * ? *)' bash infra/cost-guard/deploy.sh
 #   21:00 IST = cron(30 15 * * ? *).  09:00 IST = cron(30 3 * * ? *).
 set -euo pipefail
@@ -22,6 +23,6 @@ fi
 # The six tags the SCP requires. Stack tags are copied onto every resource.
 $A cloudformation deploy --stack-name "$STACK" --template-file "$DIR/template.yaml" \
   --capabilities CAPABILITY_NAMED_IAM --no-fail-on-empty-changeset \
-  --parameter-overrides AlertEmail="owner@example.com" LimitUsd="${LIMIT:-500}" StopAtUsd="${STOP_AT:-450}" ${NIGHTLY:+NightlyStopCronUtc="$NIGHTLY"} \
+  --parameter-overrides AlertEmail="owner@example.com" LimitUsd="${LIMIT:-500}" StopAtUsd="${STOP_AT:-450}" ${NIGHTLY:+NightlyStopCronUtc="$NIGHTLY"} ${FIXED:+FixedPerHourUsd="$FIXED"} \
   --tags business-unit=ai env=innovation category=rnd owner=owner@example.com app=Secure-model-hosting expire-date=recurring
 $A cloudformation describe-stacks --stack-name "$STACK" --query 'Stacks[0].[StackStatus,Outputs]' --output json

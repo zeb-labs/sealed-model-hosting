@@ -176,6 +176,9 @@ def make_tools(session: Any, args: argparse.Namespace) -> Dict[str, Callable[[Di
     def my_permissions(i: Dict[str, Any]) -> Any:
         actions = [a for a in i.get("actions", []) if re.fullmatch(r"[a-z0-9-]+:[A-Za-z*]+", str(a))][:20]
         arn = sts.get_caller_identity()["Arn"]
+        m = re.fullmatch(r"arn:aws:sts::(\d{12}):assumed-role/([^/]+)/.+", arn)
+        if m:       # signed in through a role (SSO, a federated login): the check needs the role itself, with its path
+            arn = iam.get_role(RoleName=m.group(2))["Role"]["Arn"]
         res = iam.simulate_principal_policy(PolicySourceArn=arn, ActionNames=actions)["EvaluationResults"]
         return {"who": arn, "results": {r["EvalActionName"]: r["EvalDecision"] for r in res},
                 "note": "this checks the user's own policy only; an organization rule (SCP) can still refuse, for example when the six tags are missing"}

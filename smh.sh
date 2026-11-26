@@ -46,7 +46,7 @@ A="aws --profile $PROFILE --region $REGION --no-cli-pager"
 PY="sealed-model-poc/.venv/bin/python"; ART="smh-poc-artifacts-$ACCOUNT"
 NAME="${NAME:-smh-poc-oc}"; STACK="$NAME"; CUST="$NAME-customer-$ACCOUNT"
 ROLE_ARN="arn:aws:iam::$ACCOUNT:role/zl/$NAME-sealed-role"
-TAGS="business-unit=ai env=innovation category=rnd owner=owner@example.com app=Secure-model-hosting expire-date=recurring"
+TAGS="${SMH_TAGS:-business-unit=ai env=innovation category=rnd owner=owner@example.com app=Secure-model-hosting expire-date=recurring}"   # SMH_TAGS: your organization's own required tags
 KEYFILE="$HOME/.smh-poc/$NAME-api-key"      # the customer's API key, on this laptop only; never printed
 BUILD="${BUILD:-$(ls -d evidence/*/build-* 2>/dev/null | while read -r d; do if [ -f "$d/customer-install/install.json" ]; then echo "$d"; fi; done | sort -t- -k2 -V | tail -1)}"
 inst() { $PY -c 'import json,sys; print(json.load(open(sys.argv[1]+"/customer-install/install.json"))[sys.argv[2]])' "$BUILD" "$1"; }
