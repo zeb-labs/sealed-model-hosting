@@ -18,8 +18,10 @@ p = argparse.ArgumentParser()
 p.add_argument("message"); p.add_argument("--session", default=str(uuid.uuid4()))
 p.add_argument("--rounds", type=int, default=1); p.add_argument("--pause", type=int, default=120)
 p.add_argument("--out", default=None)
+p.add_argument("--harness", default="deployer/.harness")       # which agent: the file deployer/setup.sh wrote for it
+p.add_argument("--again", default="Continue. Start with get_status.")
 args = p.parse_args()
-arn = open("deployer/.harness").read().split()[-1]
+arn = open(args.harness).read().split()[-1]
 client = boto3.Session(profile_name=os.environ.get("SMH_PROFILE", "poc-ino"), region_name=os.environ.get("SMH_REGION", "us-east-1")).client("bedrock-agentcore")
 out = open(args.out, "a") if args.out else None
 
@@ -70,6 +72,6 @@ for _ in range(args.rounds - 1):
     if status != "WORKING":
         break
     time.sleep(args.pause)
-    status = turn("Continue. Start with get_status.")
+    status = turn(args.again)
 log(f"\nFINAL STATUS: {status}   (session {args.session})")
 sys.exit(0 if status in ("DONE", "NEEDS_APPROVAL", "WORKING") else 1)

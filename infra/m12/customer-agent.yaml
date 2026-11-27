@@ -1,0 +1,210 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  smh-poc M12, the customer-side agent on AgentCore. In real life this stack
+  lives in the CUSTOMER's account. The agent (a Harness) can only call its own
+  Gateway; the Gateway can only invoke one Lambda function; the function can
+  only create or delete stacks named smh-poc-oc* from two fixed templates, by
+  handing CloudFormation its own role, and stop or start our tagged machine.
+  The broad rights sit in CloudFormation's role, which only CloudFormation can
+  use and only this function can hand over. Tags come from the stack tags.
+
+Parameters:
+  CodeKey: {Type: String}
+  ModelArn: {Type: String}
+  FoundationModelArn: {Type: String, Default: "arn:aws:bedrock:*::foundation-model/anthropic.*"}
+  Owner: {Type: String}
+
+Resources:
+  StackRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: smh-poc-customer-stack-role
+      Path: /zl/
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: cloudformation.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition: {StringEquals: {"aws:SourceAccount": !Ref "AWS::AccountId"}}
+      Policies:
+        - PolicyName: smh-poc-customer-stack
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: Look
+                Effect: Allow
+                Action: [ec2:Describe*, elasticloadbalancing:Describe*, ssm:GetParameters, logs:DescribeLogGroups, kms:ListAliases, s3:ListAllMyBuckets]
+                Resource: "*"
+              - Sid: MakeNewThings
+                Effect: Allow
+                Action: [ec2:RunInstances, ec2:CreateVpc, ec2:CreateSubnet, ec2:CreateRouteTable, ec2:CreateSecurityGroup, ec2:CreateVpcEndpoint,
+                         ec2:CreateTags, ec2:AssociateRouteTable, ec2:ModifyVpcAttribute, ec2:ModifySubnetAttribute,
+                         elasticloadbalancing:CreateLoadBalancer, elasticloadbalancing:CreateTargetGroup, elasticloadbalancing:CreateListener,
+                         elasticloadbalancing:AddTags, kms:CreateKey, kms:TagResource]
+                Resource: "*"
+              - Sid: ChangeOrRemoveOnlyWhatCarriesOurTags
+                Effect: Allow
+                Action: [ec2:TerminateInstances, ec2:StopInstances, ec2:StartInstances, ec2:Delete*, ec2:DisassociateRouteTable, ec2:AuthorizeSecurityGroupIngress,
+                         ec2:AuthorizeSecurityGroupEgress, ec2:RevokeSecurityGroupIngress, ec2:RevokeSecurityGroupEgress, ec2:ModifyVpcEndpoint,
+                         ec2:ModifyInstanceAttribute, "elasticloadbalancing:Delete*", "elasticloadbalancing:Modify*", elasticloadbalancing:RegisterTargets,
+                         elasticloadbalancing:DeregisterTargets, elasticloadbalancing:SetSecurityGroups, elasticloadbalancing:SetSubnets, "kms:*"]
+                Resource: "*"
+                Condition:
+                  StringEquals: {"aws:ResourceTag/app": Secure-model-hosting, "aws:ResourceTag/owner": !Ref Owner}
+              - Sid: OurAliases
+                Effect: Allow
+                Action: [kms:CreateAlias, kms:DeleteAlias, kms:UpdateAlias]
+                Resource: !Sub arn:aws:kms:${AWS::Region}:${AWS::AccountId}:alias/smh-poc-oc*
+              - Sid: OurBucketsAndLogGroups
+                Effect: Allow
+                Action: ["s3:*", "logs:*"]
+                Resource:
+                  - arn:aws:s3:::smh-poc-oc*
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/smh-poc-oc*
+              - Sid: TheMachinesRoleAndProfileUnderOurPathAndName
+                Effect: Allow
+                Action: "iam:*"
+                Resource:
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/zl/smh-poc-oc*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/smh-poc-oc*      # CloudFormation looks the role up before it knows the path
+                  - !Sub arn:aws:iam::${AWS::AccountId}:instance-profile/smh-poc-oc*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:instance-profile/zl/smh-poc-oc*
+
+  ToolsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: smh-poc-customer-tools-role
+      Path: /zl/
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - {Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: sts:AssumeRole}
+      Policies:
+        - PolicyName: smh-poc-customer-tools
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: Logs
+                Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/smh-poc-customer-tools:*
+              - Sid: OnlyStacksOfThisNameAndOnlyWithCloudFormationsOwnRole
+                Effect: Allow
+                Action: [cloudformation:CreateStack, cloudformation:DeleteStack]
+                Resource: !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/smh-poc-oc*/*
+                Condition: {StringEquals: {"cloudformation:RoleArn": !GetAtt StackRole.Arn}}
+              - Sid: ReadThoseStacks
+                Effect: Allow
+                Action: [cloudformation:DescribeStacks, cloudformation:DescribeStackEvents]
+                Resource: !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/smh-poc-oc*/*
+              - Sid: HandTheStacksToTheirOwnRole
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt StackRole.Arn
+              - Sid: TheFixedTemplatesTheInstallPackageAndTheRequest
+                Effect: Allow
+                Action: s3:GetObject
+                Resource:
+                  - !Sub arn:aws:s3:::smh-poc-artifacts-${AWS::AccountId}/build/src/infra/oneclick/*
+                  - !Sub arn:aws:s3:::smh-poc-artifacts-${AWS::AccountId}/build/src/infra/m1/client-test.sh
+                  - !Sub arn:aws:s3:::smh-poc-artifacts-${AWS::AccountId}/build/out-*/customer-install/install.json
+                  - !Sub arn:aws:s3:::smh-poc-artifacts-${AWS::AccountId}/deploy/customer/*
+              - Sid: TheApiKeyFileInTheCustomersBucket
+                Effect: Allow
+                Action: [s3:GetObject, s3:PutObject]
+                Resource: arn:aws:s3:::smh-poc-oc*/gate/api-keys.txt
+              - Sid: UnderTheCustomersOwnKeyThroughS3Only
+                Effect: Allow
+                Action: [kms:GenerateDataKey, kms:Decrypt]
+                Resource: !Sub arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*
+                Condition:
+                  StringEquals: {"aws:ResourceTag/app": Secure-model-hosting, "kms:ViaService": !Sub "s3.${AWS::Region}.amazonaws.com"}
+                  ForAnyValue:StringLike: {"kms:ResourceAliases": "alias/smh-poc-oc*"}
+              - Sid: LookAtMachines
+                Effect: Allow
+                Action: ec2:DescribeInstances
+                Resource: "*"
+              - Sid: ConsoleAndPowerOfOurTaggedMachinesOnly
+                Effect: Allow
+                Action: [ec2:GetConsoleOutput, ec2:StopInstances, ec2:StartInstances]
+                Resource: !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+                Condition:
+                  StringEquals: {"aws:ResourceTag/app": Secure-model-hosting, "aws:ResourceTag/owner": !Ref Owner}
+              - Sid: TagTheMachinesProfile
+                Effect: Allow
+                Action: iam:TagInstanceProfile
+                Resource: !Sub arn:aws:iam::${AWS::AccountId}:instance-profile/zl/smh-poc-oc*
+  ToolsLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: {LogGroupName: /aws/lambda/smh-poc-customer-tools, RetentionInDays: 30}
+  Tools:
+    Type: AWS::Lambda::Function
+    DependsOn: ToolsLogs
+    Properties:
+      FunctionName: smh-poc-customer-tools
+      Runtime: python3.12
+      Handler: customer.lambda_handler
+      Role: !GetAtt ToolsRole.Arn
+      Timeout: 60
+      MemorySize: 256
+      Code: {S3Bucket: !Sub "smh-poc-artifacts-${AWS::AccountId}", S3Key: !Ref CodeKey}
+      Environment:
+        Variables:
+          BUCKET: !Sub "smh-poc-artifacts-${AWS::AccountId}"
+          SMH_ACCOUNT: !Ref "AWS::AccountId"
+          CFN_ROLE: !GetAtt StackRole.Arn
+          TAGS: !Sub '{"business-unit":"ai","env":"innovation","category":"rnd","owner":"${Owner}","app":"Secure-model-hosting","expire-date":"recurring"}'
+
+  GatewayRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: smh-poc-customer-gateway-role
+      Path: /zl/
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: bedrock-agentcore.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition: {StringEquals: {"aws:SourceAccount": !Ref "AWS::AccountId"}}
+      Policies:
+        - PolicyName: smh-poc-customer-gateway
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - {Effect: Allow, Action: lambda:InvokeFunction, Resource: !GetAtt Tools.Arn}
+  AgentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: smh-poc-customer-agent-role
+      Path: /zl/
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: bedrock-agentcore.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition: {StringEquals: {"aws:SourceAccount": !Ref "AWS::AccountId"}}
+      Policies:
+        - PolicyName: smh-poc-customer-agent
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ThinkWithOneModel
+                Effect: Allow
+                Action: [bedrock:InvokeModel, bedrock:InvokeModelWithResponseStream]
+                Resource: [!Ref ModelArn, !Ref FoundationModelArn]
+              - Sid: CallItsOwnGatewayAndNothingElse
+                Effect: Allow
+                Action: bedrock-agentcore:InvokeGateway
+                Resource: !Sub arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:gateway/smh-poc-customer-*
+              - Sid: ItsOwnLogs
+                Effect: Allow
+                Action: [logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents, logs:DescribeLogStreams]
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/*
+
+Outputs:
+  ToolsArn: {Value: !GetAtt Tools.Arn}
+  GatewayRoleArn: {Value: !GetAtt GatewayRole.Arn}
+  AgentRoleArn: {Value: !GetAtt AgentRole.Arn}

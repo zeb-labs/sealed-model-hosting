@@ -369,14 +369,28 @@ print("  all %d checks PASS, image check OK: approving as agreed at the start" %
 up)     # the customer's whole job in one command
   say "Setting up the customer's side: network, sealed machine, API key, test call (about 25 minutes)"
   if ! onboarded; then echo "Note: the builder has not given this customer access yet (bash smh.sh onboard). The machine will be refused the key until then."; fi
+  if [ -f agent/.customer-harness ] && [ "${SMH_UP:-agent}" = agent ]; then
+    # The customer agent on AgentCore does the work: stack, machine, API key, test. SMH_UP=script uses the steps below instead.
+    guard customer "bring up the customer's side with the agent" bash "$0" _agent_up || { echo "The customer's side is not up. Run the same command again when the cause above is fixed."; exit 1; }
+    mkdir -p "$(dirname "$KEYFILE")"; (umask 077; $A s3 cp --only-show-errors "s3://$CUST/gate/api-keys.txt" - | head -1 > "$KEYFILE")     # the agent never sees the key
+  else
   guard customer "create the stack and start the sealed machine" bash "$0" install || { echo "The machine is not serving, so the API key and the test call were skipped. Run the same command again when the cause above is fixed."; exit 1; }
   if ! has_key || [ ! -s "$KEYFILE" ]; then guard customer "make an API key" bash "$0" api-key; sleep 45; fi
   guard customer "call the endpoint" bash "$0" test
+  fi
   say "Ready"
   echo "Endpoint : $(out Endpoint)   (reachable from inside the customer's network only)"
   echo "API key  : in $KEYFILE"
   echo "Call it  : curl -k -H \"Authorization: Bearer <key>\" -H \"Content-Type: application/json\" -d '{\"model\":\"demo\",\"prompt\":\"Hello\",\"max_tokens\":40}' $(out Endpoint)/v1/completions"
   echo "Next     : bash smh.sh finetune <file.jsonl>      Remove: bash smh.sh remove" ;;
+_agent_up)
+  # The request: which release, and this account's own network settings. The agent can read it, not change it.
+  $PY -c 'import json,sys; print(json.dumps({"version": sys.argv[1], "extra": dict(kv.split("=", 1) for kv in sys.argv[2:] if "=" in kv)}))' \
+    "$(inst version)" ${OC_EXTRA:-} ${SOURCE:+ModelSource="$SOURCE"} | $A s3 cp --only-show-errors - "s3://$ART/deploy/customer/$NAME.json"
+  mkdir -p evidence/releases; T="evidence/releases/agent-customer-$NAME.txt"; echo "  Full notes: $T"
+  OUT="$T" HARNESS=agent/.customer-harness AGAIN="Continue. Start with status." PAUSE=90 bash deployer/run.sh "Bring up the customer's side, stack $NAME." 2>&1 \
+    | grep --line-buffered -v "tool call\|tool result\|\[stop\|^=====\|^HUMAN\|^AGENT\|^$" || true
+  tail -3 "$T" | grep -q "FINAL STATUS: DONE" ;;
 release)
   mkdir -p evidence/releases; T="$(T_OF "$3")"; HINT="The lock step takes about 25 minutes; it is not stuck before 45."
   # The agent's full working notes go to the file $T. The screen shows plain progress lines only (SMH_RAW=1 shows everything).

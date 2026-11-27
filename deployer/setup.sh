@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Create or update the two agents on AgentCore. Each is a stack (a Lambda function with narrow roles), a Gateway
+# Create or update the three agents on AgentCore. Each is a stack (a Lambda function with narrow roles), a Gateway
 # with one target, and a Harness (the agent loop) that may call only that Gateway.
 #   the release agent  smh_poc_deployer   acts through fixed tools (deployer/tools.py)
 #   the watcher        smh_poc_watcher    only reads, then decides (agent/fixer.py, agent/diagnose.py)
+#   the customer agent smh_poc_customer   brings up and tests ONE customer's side (agent/customer.py); in real life
+#                                         this one lives in the customer's own account
 #   bash deployer/setup.sh            create or update both
 #   bash deployer/setup.sh --delete   remove all of it
 # Settings: MODEL, else SMH_AGENT_MODEL in smh.env, else an inference profile in .env: the Bedrock inference
@@ -26,7 +28,8 @@ out() { $A cloudformation describe-stacks --stack-name "$1" --query "Stacks[0].O
 
 #        stack                 gateway              harness           state file        steps
 AGENTS=("smh-poc-m7-deployer smh-poc-deployer-gw smh_poc_deployer deployer/.harness 30"
-        "smh-poc-m12-watcher smh-poc-watcher-gw  smh_poc_watcher  agent/.harness    14")
+        "smh-poc-m12-watcher smh-poc-watcher-gw  smh_poc_watcher  agent/.harness    14"
+        "smh-poc-m12-customer smh-poc-customer-gw smh_poc_customer agent/.customer-harness 20")
 
 if [ "${1:-}" = "--delete" ]; then
   for agent in "${AGENTS[@]}"; do
@@ -45,12 +48,16 @@ fi
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 for agent in "${AGENTS[@]}"; do
   read -r STACK GW HARNESS STATE STEPS <<<"$agent"
+  if [ -n "${ONLY:-}" ] && [ "$ONLY" != "$HARNESS" ]; then continue; fi      # ONLY=<harness name>: update just that agent
   echo "== $HARNESS"
   # 1. the function's code, named by its content so an update is picked up; and the agent's tools and instructions
   rm -f "$T"/*
   if [ "$HARNESS" = smh_poc_deployer ]; then
     cp deployer/tools.py deployer/handler.py "$T/"; TEMPLATE=infra/m7/deployer.yaml; EXTRA=(Owner="$OWNER")
     python3 -c 'import json,sys; sys.path.insert(0,"deployer"); import tools; json.dump(tools.SCHEMAS, open(sys.argv[1]+"/schemas.json","w")); json.dump([{"text": open("deployer/instructions.md").read()}], open(sys.argv[1]+"/prompt.json","w"))' "$T"
+  elif [ "$HARNESS" = smh_poc_customer ]; then
+    cp agent/customer.py "$T/"; TEMPLATE=infra/m12/customer-agent.yaml; EXTRA=(Owner="$OWNER")
+    python3 -c 'import json,sys; sys.path.insert(0,"agent"); import customer; json.dump(customer.SCHEMAS, open(sys.argv[1]+"/schemas.json","w")); json.dump([{"text": customer.INSTRUCTIONS}], open(sys.argv[1]+"/prompt.json","w"))' "$T"
   else
     cp agent/fixer.py agent/diagnose.py "$T/"; TEMPLATE=infra/m12/watcher.yaml; EXTRA=(Owner="$OWNER")
     python3 -c 'import json,sys; sys.path.insert(0,"agent"); import fixer; json.dump(fixer.gateway_schemas(), open(sys.argv[1]+"/schemas.json","w")); json.dump([{"text": fixer.harness_prompt()}], open(sys.argv[1]+"/prompt.json","w"))' "$T"

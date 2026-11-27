@@ -138,8 +138,9 @@ It is safe to run again: what exists is left alone. It does three things.
 | First customer | `smh-poc-m1-customer` | A customer of your own, for tests and the demo |
 | Build machine | `smh-poc-m1-builder` | Stopped when idle |
 
-**2. Sets up the two agents on AWS AgentCore** (`deployer/setup.sh`): the release
-agent and the watcher. Each is a harness that may call only its own gateway.
+**2. Sets up the three agents on AWS AgentCore** (`deployer/setup.sh`): the release
+agent, the watcher, and the customer agent that `bash smh.sh up` hands its work to
+(`SMH_UP=script bash smh.sh up` does the same steps without the agent). Each is a harness that may call only its own gateway.
 Both think with the Claude inference profile you named; nothing is created for it.
 
 **3. The release agent prepares the build machine.** It checks that every piece

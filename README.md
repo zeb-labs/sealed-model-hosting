@@ -29,7 +29,7 @@ below says plainly what was run and what was not.
 | Cut-off | Answers stop 80 to 120 seconds after the keys are disabled. |
 | Spend so far | About 70 USD of a 500 USD limit. |
 
-**27 November:** the remediation agent now runs on AWS AgentCore next to the release agent, and `bash smh.sh setup` sets up the builder's side with one command (`docs/m12-plan.md`). Release 0.12.0 was made and served with them; the full suite has not run on it.
+**27 November:** the remediation agent now runs on AWS AgentCore next to the release agent, and `bash smh.sh setup` sets up the builder's side with one command (`docs/m12-plan.md`), and `bash smh.sh up` is carried out by a customer agent on AgentCore. Release 0.12.0 was made and served with them; the full suite has not run on it.
 
 Not shown, said plainly:
 
