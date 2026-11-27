@@ -14,6 +14,8 @@
 #   bash smh.sh <command>       any single action, straight from the command line (list below)
 #
 # The builder:
+#   setup                                FIRST TIME: creates every fixed piece of the builder's side that is missing, sets up
+#                                        the two agents on AgentCore, then the agent prepares the build machine. Safe to run again.
 #   release <model> <version> <folder>   the agent prepares a release and stops for approval
 #   approve <version>                    YOU type yes; then the agent ties both keys to the image
 #   onboard [role ARN] | offboard        let one customer's machine role ask for the keys, or take that away
@@ -39,14 +41,14 @@
 # stack make its own network.
 set -euo pipefail
 cd "$(dirname "$0")"
-if [ -f smh.env ]; then . ./smh.env; fi
-PROFILE="poc-ino"; ACCOUNT="111122223333"; REGION="us-east-1"
+if [ -f smh.env ]; then set -a; . ./smh.env; set +a; fi      # exported, so every script this one calls sees the same settings
+PROFILE="${SMH_PROFILE:-poc-ino}"; ACCOUNT="${SMH_ACCOUNT:-111122223333}"; REGION="${SMH_REGION:-us-east-1}"
 A="aws --profile $PROFILE --region $REGION --no-cli-pager"
 [ "$($A sts get-caller-identity --query Account --output text)" = "$ACCOUNT" ] || { echo "STOP: wrong account"; exit 1; }
 PY="sealed-model-poc/.venv/bin/python"; ART="smh-poc-artifacts-$ACCOUNT"
 NAME="${NAME:-smh-poc-oc}"; STACK="$NAME"; CUST="$NAME-customer-$ACCOUNT"
 ROLE_ARN="arn:aws:iam::$ACCOUNT:role/zl/$NAME-sealed-role"
-TAGS="${SMH_TAGS:-business-unit=ai env=innovation category=rnd owner=owner@example.com app=Secure-model-hosting expire-date=recurring}"   # SMH_TAGS: your organization's own required tags
+TAGS="${SMH_TAGS:-business-unit=ai env=innovation category=rnd owner=${SMH_OWNER:-owner@example.com} app=Secure-model-hosting expire-date=recurring}"   # SMH_TAGS: your organization's own required tags
 KEYFILE="$HOME/.smh-poc/$NAME-api-key"      # the customer's API key, on this laptop only; never printed
 BUILD="${BUILD:-$(ls -d evidence/*/build-* 2>/dev/null | while read -r d; do if [ -f "$d/customer-install/install.json" ]; then echo "$d"; fi; done | sort -t- -k2 -V | tail -1)}"
 inst() { $PY -c 'import json,sys; print(json.load(open(sys.argv[1]+"/customer-install/install.json"))[sys.argv[2]])' "$BUILD" "$1"; }
@@ -289,6 +291,28 @@ menu) menu ;;
 builder) builder_menu ;;
 customer) customer_menu ;;
 more) more_menu ;;
+setup)  # the builder's side from nothing: fixed stacks by this command, the build machine by the agent
+  say "First-time setup of the builder's side. What exists is left alone."
+  [ -x "$PY" ] || { python3 -m venv sealed-model-poc/.venv && sealed-model-poc/.venv/bin/pip install -q -r sealed-model-poc/requirements.txt; }
+  piece() {   # piece <stack> <command...>: create it only when it is not there
+    local stack="$1" st; shift
+    st="$($A cloudformation describe-stacks --stack-name "$stack" --query 'Stacks[0].StackStatus' --output text 2>/dev/null || true)"
+    case "$st" in CREATE_COMPLETE|UPDATE_COMPLETE|UPDATE_ROLLBACK_COMPLETE) echo "  exists    $stack";;
+      *) echo "  creating  $stack"; guard builder "create $stack" "$@" || { echo "  $stack was not created. Fix the cause named above, then run  bash smh.sh setup  again."; exit 1; };; esac
+  }
+  piece smh-poc-cost-guard  bash infra/cost-guard/deploy.sh     # spend tracking and the nightly stop, before anything that costs
+  piece smh-poc-m1-base     bash infra/m1/deploy.sh base        # networks, the builder's bucket, machine roles
+  piece smh-poc-m1-key      bash infra/m1/deploy.sh key         # the model key: releases nothing until a release is approved
+  piece smh-poc-m1-lease    bash infra/m1/deploy.sh lease
+  piece smh-poc-m1-customer bash infra/m1/deploy.sh customer    # a first customer of your own, for tests and the demo
+  piece smh-poc-m1-builder  bash infra/m1/deploy.sh builder     # the build machine
+  say "The two agents on AgentCore (release agent, watcher)"
+  guard builder "set up the agents on AgentCore" bash deployer/setup.sh | grep -v "^gateway\|Waiting for\|^$" || exit 1
+  say "The agent prepares the build machine (about 15 minutes the first time, 3 when it is already prepared)"
+  mkdir -p evidence/releases; T="evidence/releases/agent-setup.txt"; echo "  Full notes: $T"
+  OUT="$T" PAUSE=60 bash deployer/run.sh "Set up the builder's environment." 2>&1 | grep --line-buffered -v "tool call\|tool result\|\[stop\|^=====\|^HUMAN\|^AGENT\|^$" || true
+  $A s3 cp --only-show-errors "$T" "s3://$ART/deploy/0.0.0/agent-notes.txt" || true      # the run record stays in the builder's account
+  if tail -3 "$T" | grep -q "FINAL STATUS: DONE"; then say "The builder's side is ready. Next: bash smh.sh ship <model>"; else echo "Setup did not finish. Read $T, then run  bash smh.sh setup  again."; exit 1; fi ;;
 ship)   # the builder's whole job in one command
   MODEL="${2:-Qwen/Qwen2.5-1.5B-Instruct}"; V="${3:-$(inst version | awk -F. '{print $1"."$2"."$3+1}')}"; F="m$(echo "$V" | tr -d .)"
   if [ -d "$MODEL" ] || [ "${MODEL#s3://}" != "$MODEL" ]; then
@@ -358,6 +382,7 @@ release)
   # The agent's full working notes go to the file $T. The screen shows plain progress lines only (SMH_RAW=1 shows everything).
   echo "  Full notes: $T"
   OUT="$T" bash deployer/run.sh "Deploy $2 as version $3 in folder $4. $HINT" 2>&1 | shown || true
+  $A s3 cp --only-show-errors "$T" "s3://$ART/deploy/$3/agent-notes.txt" || true      # the run record stays in the builder's account
   # No blind retry here: when the agent stops early, the watcher (guard) finds out why. It waits and retries for a
   # passing cause such as no free GPU machine, and goes to a person for a real one such as a model that cannot be used.
   if ! tail -3 "$T" | grep -q "FINAL STATUS: \(NEEDS_APPROVAL\|DONE\)"; then

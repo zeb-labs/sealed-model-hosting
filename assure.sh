@@ -16,7 +16,7 @@
 # and deletes the test machines. Evidence is judged by assure/report.py only.
 set -uo pipefail
 cd "$(dirname "$0")"
-PROFILE="poc-ino"; ACCOUNT="111122223333"; REGION="us-east-1"
+PROFILE="${SMH_PROFILE:-poc-ino}"; ACCOUNT="${SMH_ACCOUNT:-111122223333}"; REGION="${SMH_REGION:-us-east-1}"
 A="aws --profile $PROFILE --region $REGION --no-cli-pager"
 [ "$($A sts get-caller-identity --query Account --output text)" = "$ACCOUNT" ] || { echo "STOP: wrong account"; exit 1; }
 
@@ -157,7 +157,7 @@ live() {
 }
 
 disk_compare() {   # the stopped machine's system disk must equal the released image
-  local I="$1" B="$2" L="$3" T="{Key=business-unit,Value=ai},{Key=env,Value=innovation},{Key=category,Value=rnd},{Key=owner,Value=owner@example.com},{Key=app,Value=Secure-model-hosting},{Key=expire-date,Value=recurring}"
+  local I="$1" B="$2" L="$3" T="{Key=business-unit,Value=ai},{Key=env,Value=innovation},{Key=category,Value=rnd},{Key=owner,Value=${SMH_OWNER:-owner@example.com}},{Key=app,Value=Secure-model-hosting},{Key=expire-date,Value=recurring}"
   local ROOTVOL SNAP VOL AZ
   ROOTVOL="$($A ec2 describe-instances --instance-ids "$I" --query 'Reservations[0].Instances[0].BlockDeviceMappings[0].Ebs.VolumeId' --output text)"
   AZ="$($A ec2 describe-instances --instance-ids "$B" --query 'Reservations[0].Instances[0].Placement.AvailabilityZone' --output text)"
@@ -249,7 +249,7 @@ breaks() {
   local B1=""; want B1 && B1="$($A ec2 register-image --name "smh-poc-break-b1-$(date -u +%Y%m%d%H%M%S)" --root-device-name /dev/xvda --architecture x86_64 \
     --virtualization-type hvm --boot-mode uefi --tpm-support v2.0 --ena-support \
     --block-device-mappings "DeviceName=/dev/xvda,Ebs={SnapshotId=$SNAP,VolumeType=gp3,DeleteOnTermination=true}" \
-    --tag-specifications "ResourceType=image,Tags=[{Key=Name,Value=smh-poc-break-b1},{Key=business-unit,Value=ai},{Key=env,Value=innovation},{Key=category,Value=rnd},{Key=owner,Value=owner@example.com},{Key=app,Value=Secure-model-hosting},{Key=expire-date,Value=recurring}]" \
+    --tag-specifications "ResourceType=image,Tags=[{Key=Name,Value=smh-poc-break-b1},{Key=business-unit,Value=ai},{Key=env,Value=innovation},{Key=category,Value=rnd},{Key=owner,Value=${SMH_OWNER:-owner@example.com}},{Key=app,Value=Secure-model-hosting},{Key=expire-date,Value=recurring}]" \
     --query ImageId --output text)" && TEMP_AMIS+=("$B1")
   [ -n "${B1:-}" ] && want B1 && one_break B1 "$B1" smh-poc-sealed-instance-profile 600
   want B2 && one_break B2 "$B2" smh-poc-sealed-instance-profile 600

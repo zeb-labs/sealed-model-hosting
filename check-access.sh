@@ -3,9 +3,9 @@
 # It only lists, describes, simulates and dry-runs.
 # It creates nothing, changes nothing and deletes nothing.
 
-PROFILE="poc-ino"
-EXPECTED_ACCOUNT="111122223333"
-REGION="us-east-1"
+PROFILE="${SMH_PROFILE:-poc-ino}"
+EXPECTED_ACCOUNT="${SMH_ACCOUNT:-111122223333}"
+REGION="${SMH_REGION:-us-east-1}"
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 REPORT="$DIR/access-report.txt"

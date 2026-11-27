@@ -10,7 +10,7 @@ set -euo pipefail
 #   PREFIX    bucket folder that holds the locked model objects
 #   ART       name of the artifact list in that folder
 #   VERSION   image version; written into the recipe and the usage records
-REGION=us-east-1; BUCKET=smh-poc-artifacts-111122223333; PREFIX=${PREFIX:-m9}; ART=${ART:-artifacts.json}; VERSION=${VERSION:-0.8.1}
+REGION="${SMH_REGION:-us-east-1}"; BUCKET=smh-poc-artifacts-${SMH_ACCOUNT:-111122223333}; PREFIX=${PREFIX:-m9}; ART=${ART:-artifacts.json}; VERSION=${VERSION:-0.8.1}
 KEY_ALIAS=alias/smh-poc-model-key; LEASE_ALIAS=alias/smh-poc-lease-key
 SRC=/opt/smh/src; WORK=${WORK:-/mnt/m5}; DESC=$WORK/desc; OUT=$WORK/out; NV=/mnt/m3/nvidia
 export PYTHONPATH=$SRC
@@ -33,9 +33,11 @@ print(json.dumps(m["images"]))
 PY
 
 echo "== 2. check the NVIDIA inputs =="
+# "our key" is whichever db key this build machine holds: the test one, or the builder's own.
+SIGNER="$(openssl x509 -in /opt/smh/sb/db.crt -noout -subject -nameopt multiline | sed -n 's/^ *commonName *= *//p')"
 K=$(ls "$NV"/modules/nvidia.ko >/dev/null && modinfo -F vermagic "$NV/modules/nvidia.ko" | cut -d' ' -f1)
 for m in "$NV"/modules/*.ko; do
-  [ "$(modinfo -F signer "$m")" = "smh-poc test db" ] || { echo "module not signed with our key: $m"; exit 1; }
+  [ "$(modinfo -F signer "$m")" = "$SIGNER" ] || { echo "module not signed with our key: $m"; exit 1; }
 done
 rpm -K "$NV"/rpms/*.rpm | grep -v "digests signatures OK" && { echo "package signature problem"; exit 1; }
 echo "modules for kernel $K, signed with our key; $(ls "$NV"/rpms/*.rpm | wc -l) packages verified"

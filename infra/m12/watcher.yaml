@@ -1,0 +1,142 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  smh-poc M12, the watcher (remediation agent) on AgentCore. The agent (a
+  Harness) can only call its own Gateway; the Gateway can only invoke one
+  Lambda function; the function can only READ (stack events, a machine's
+  console, step logs, key state, a person's permissions, limits) and write the
+  record of a decision under deploy/watch/. It is separate from the release
+  agent on purpose: text from a log can reach this agent, and this agent can
+  change nothing. Tags come from the stack tags.
+
+Parameters:
+  CodeKey: {Type: String}            # watcher zip in the artifacts bucket
+  ModelArn: {Type: String}           # the Bedrock inference profile the agent thinks with
+  FoundationModelArn: {Type: String, Default: "arn:aws:bedrock:*::foundation-model/anthropic.*"}
+  Owner: {Type: String}              # the owner tag our machines carry
+
+Resources:
+  ToolsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: smh-poc-watcher-tools-role
+      Path: /zl/
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - {Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: sts:AssumeRole}
+      Policies:
+        - PolicyName: smh-poc-watcher-tools
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: Logs
+                Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/smh-poc-watcher-tools:*
+              - Sid: WhyAStackOfThisProjectFailed
+                Effect: Allow
+                Action: [cloudformation:DescribeStacks, cloudformation:DescribeStackEvents]
+                Resource: !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/smh-poc-*/*
+              - Sid: LookAtMachinesNetworksAndLimits
+                Effect: Allow
+                Action: [ec2:DescribeInstances, ec2:DescribeVpcs, servicequotas:GetServiceQuota]
+                Resource: "*"
+              - Sid: TheConsoleOfOurTaggedMachinesOnly
+                Effect: Allow
+                Action: ec2:GetConsoleOutput
+                Resource: !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+                Condition:
+                  StringEquals: {"aws:ResourceTag/app": Secure-model-hosting, "aws:ResourceTag/owner": !Ref Owner}
+              - Sid: StepLogsAndStagedModelFacts
+                Effect: Allow
+                Action: s3:GetObject
+                Resource:
+                  - !Sub arn:aws:s3:::smh-poc-artifacts-${AWS::AccountId}/deploy/*/logs/*
+                  - !Sub arn:aws:s3:::smh-poc-artifacts-${AWS::AccountId}/deploy/models-in/*/model-info.json
+              - Sid: ListSoAMissingObjectIsNotAnError
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub arn:aws:s3:::smh-poc-artifacts-${AWS::AccountId}
+              - Sid: TheOneThingItWritesTheRecordOfADecision
+                Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub arn:aws:s3:::smh-poc-artifacts-${AWS::AccountId}/deploy/watch/*
+              - Sid: StateOfOurKeysNeverTheirUse
+                Effect: Allow
+                Action: kms:DescribeKey
+                Resource: !Sub arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*
+                Condition:
+                  ForAnyValue:StringLike: {"kms:ResourceAliases": "alias/smh-poc-*"}
+              - Sid: WhatAPersonMayDo
+                Effect: Allow
+                Action: [iam:SimulatePrincipalPolicy, iam:GetRole]
+                Resource: [!Sub "arn:aws:iam::${AWS::AccountId}:user/*", !Sub "arn:aws:iam::${AWS::AccountId}:role/*"]
+  ToolsLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: {LogGroupName: /aws/lambda/smh-poc-watcher-tools, RetentionInDays: 30}
+  Tools:
+    Type: AWS::Lambda::Function
+    DependsOn: ToolsLogs
+    Properties:
+      FunctionName: smh-poc-watcher-tools
+      Runtime: python3.12
+      Handler: diagnose.lambda_handler
+      Role: !GetAtt ToolsRole.Arn
+      Timeout: 60
+      MemorySize: 256
+      Code: {S3Bucket: !Sub "smh-poc-artifacts-${AWS::AccountId}", S3Key: !Ref CodeKey}
+      Environment:
+        Variables: {BUCKET: !Sub "smh-poc-artifacts-${AWS::AccountId}", SMH_ACCOUNT: !Ref "AWS::AccountId", SMH_REGION: !Ref "AWS::Region"}
+
+  GatewayRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: smh-poc-watcher-gateway-role
+      Path: /zl/
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: bedrock-agentcore.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition: {StringEquals: {"aws:SourceAccount": !Ref "AWS::AccountId"}}
+      Policies:
+        - PolicyName: smh-poc-watcher-gateway
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - {Effect: Allow, Action: lambda:InvokeFunction, Resource: !GetAtt Tools.Arn}
+  AgentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: smh-poc-watcher-agent-role
+      Path: /zl/
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: bedrock-agentcore.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition: {StringEquals: {"aws:SourceAccount": !Ref "AWS::AccountId"}}
+      Policies:
+        - PolicyName: smh-poc-watcher-agent
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ThinkWithOneModel
+                Effect: Allow
+                Action: [bedrock:InvokeModel, bedrock:InvokeModelWithResponseStream]
+                Resource: [!Ref ModelArn, !Ref FoundationModelArn]
+              - Sid: CallItsOwnGatewayAndNothingElse
+                Effect: Allow
+                Action: bedrock-agentcore:InvokeGateway
+                Resource: !Sub arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:gateway/smh-poc-watcher-*
+              - Sid: ItsOwnLogs
+                Effect: Allow
+                Action: [logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents, logs:DescribeLogStreams]
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/*
+
+Outputs:
+  ToolsArn: {Value: !GetAtt Tools.Arn}
+  GatewayRoleArn: {Value: !GetAtt GatewayRole.Arn}
+  AgentRoleArn: {Value: !GetAtt AgentRole.Arn}

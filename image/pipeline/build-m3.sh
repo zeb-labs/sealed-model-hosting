@@ -6,7 +6,7 @@
 #         (signed kernel modules and verified packages), s3://.../m3/m3-artifacts.json
 # Outputs: /mnt/m3/out/summary.json and the signed raw image in /mnt/m3/signed.
 set -euo pipefail
-REGION=us-east-1; BUCKET=smh-poc-artifacts-111122223333; PREFIX=m3; VERSION=0.3.0
+REGION="${SMH_REGION:-us-east-1}"; BUCKET=smh-poc-artifacts-${SMH_ACCOUNT:-111122223333}; PREFIX=m3; VERSION=0.3.0
 KEY_ALIAS=alias/smh-poc-model-key
 SRC=/opt/smh/src; WORK=/mnt/m3; DESC=$WORK/desc; OUT=$WORK/out; NV=$WORK/nvidia
 export PYTHONPATH=$SRC

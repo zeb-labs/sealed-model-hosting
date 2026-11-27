@@ -11,7 +11,7 @@
 # Point 8 disables our two keys and ends the sealed machine: run it last.
 set -uo pipefail
 cd "$(dirname "$0")"
-PROFILE="poc-ino"; ACCOUNT="111122223333"; REGION="us-east-1"
+PROFILE="${SMH_PROFILE:-poc-ino}"; ACCOUNT="${SMH_ACCOUNT:-111122223333}"; REGION="${SMH_REGION:-us-east-1}"
 A="aws --profile $PROFILE --region $REGION --no-cli-pager"
 [ "$($A sts get-caller-identity --query Account --output text)" = "$ACCOUNT" ] || { echo "STOP: wrong account"; exit 1; }
 STEP="${1:?prepare, bad, 1 to 10, ask, status or finish}"

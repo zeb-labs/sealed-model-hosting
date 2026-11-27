@@ -7,7 +7,7 @@
 # Move the nightly stop (UTC cron): NIGHTLY='cron(30 15 * * ? *)' bash infra/cost-guard/deploy.sh
 #   21:00 IST = cron(30 15 * * ? *).  09:00 IST = cron(30 3 * * ? *).
 set -euo pipefail
-PROFILE="poc-ino"; ACCOUNT="111122223333"; REGION="us-east-1"; STACK="smh-poc-cost-guard"
+PROFILE="${SMH_PROFILE:-poc-ino}"; ACCOUNT="${SMH_ACCOUNT:-111122223333}"; REGION="${SMH_REGION:-us-east-1}"; STACK="smh-poc-cost-guard"
 A="aws --profile $PROFILE --region $REGION --no-cli-pager"
 DIR="$(cd "$(dirname "$0")" && pwd)"
 
@@ -23,6 +23,6 @@ fi
 # The six tags the SCP requires. Stack tags are copied onto every resource.
 $A cloudformation deploy --stack-name "$STACK" --template-file "$DIR/template.yaml" \
   --capabilities CAPABILITY_NAMED_IAM --no-fail-on-empty-changeset \
-  --parameter-overrides AlertEmail="owner@example.com" LimitUsd="${LIMIT:-500}" StopAtUsd="${STOP_AT:-450}" ${NIGHTLY:+NightlyStopCronUtc="$NIGHTLY"} ${FIXED:+FixedPerHourUsd="$FIXED"} \
-  --tags business-unit=ai env=innovation category=rnd owner=owner@example.com app=Secure-model-hosting expire-date=recurring
+  --parameter-overrides AlertEmail="${SMH_OWNER:-owner@example.com}" LimitUsd="${LIMIT:-500}" StopAtUsd="${STOP_AT:-450}" ${NIGHTLY:+NightlyStopCronUtc="$NIGHTLY"} ${FIXED:+FixedPerHourUsd="$FIXED"} \
+  --tags business-unit=ai env=innovation category=rnd owner=${SMH_OWNER:-owner@example.com} app=Secure-model-hosting expire-date=recurring
 $A cloudformation describe-stacks --stack-name "$STACK" --query 'Stacks[0].[StackStatus,Outputs]' --output json

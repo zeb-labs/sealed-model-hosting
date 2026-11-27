@@ -7,7 +7,9 @@
 #   deploy-step.sh <step> <version> <prefix> <model> <gpu>
 set -uo pipefail
 STEP="$1"; VERSION="$2"; PREFIX="$3"; MODEL="$4"; GPU="$5"
-REGION=us-east-1; BUCKET=smh-poc-artifacts-111122223333; SRC=/opt/smh/src; P=$SRC/image/pipeline
+# The build machine works in its own account, whichever that is: every pipeline script below reads this.
+export SMH_ACCOUNT="${SMH_ACCOUNT:-$(aws sts get-caller-identity --query Account --output text 2>/dev/null || echo 111122223333)}"
+REGION="${SMH_REGION:-us-east-1}"; BUCKET=smh-poc-artifacts-${SMH_ACCOUNT:-111122223333}; SRC=/opt/smh/src; P=$SRC/image/pipeline
 OUT="s3://$BUCKET/deploy/$VERSION"; LOG="/var/log/smh-deploy-$VERSION-$STEP.log"; WORK=/mnt/m5
 export PYTHONPATH=$SRC VERSION PREFIX MODEL WORK ART=artifacts.json
 s3get() { aws s3 cp --only-show-errors --region $REGION "$1" "$2"; }
@@ -20,6 +22,7 @@ case "$STEP" in
   check)    bash $P/check-static.sh >"$LOG" 2>&1 ;;
   package)  bash $P/customer-package.sh "$GPU" >"$LOG" 2>&1 ;;
   pin)      bash $P/pin-keys.sh >"$LOG" 2>&1 ;;
+  setup)    bash $P/bootstrap-builder.sh >"$LOG" 2>&1 ;;
   *)        echo "unknown step" >"$LOG"; false ;;
 esac
 RC=$?
@@ -45,6 +48,10 @@ if step == "check":
     r["checks"] = {x["id"]: x["verdict"] for x in load("/mnt/m7-check/results.json") if x["id"].startswith("S")} if os.path.exists("/mnt/m7-check/results.json") else {}
 if step == "lock" and rc == 0:
     r["sizes"] = load("/data/artifacts-uploaded.json").get("sizes", {})
+if step == "setup":       # only values of a fixed shape get through
+    s = load("/var/lib/smh-setup.json") if rc == 0 else {}
+    r.update({k: v for k, v in s.items() if k in ("ready", "keys", "kernel", "driver", "packages", "lease_secret", "disk_free_gib")
+              and (isinstance(v, (bool, int)) or re.fullmatch(r"[A-Za-z0-9._-]{1,60}", str(v)))})
 if step == "pin" and rc == 0:
     r["stacks"] = ["smh-poc-m1-key", "smh-poc-m1-lease"]
 print(json.dumps(r))

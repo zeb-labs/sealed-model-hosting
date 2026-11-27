@@ -59,3 +59,24 @@ def test_the_model_is_a_setting_never_built_in():
     assert m({"SMH_AGENT_MODEL": fixer.PLACEHOLDER}, arn) == arn
     src = open(fixer.__file__).read()
     assert "application-inference-profile/" not in src.replace("(?:application-)?inference-profile/", "") or True
+
+
+def test_on_the_gateway_the_tools_only_read_this_projects_stacks_and_decide_is_checked(monkeypatch):
+    import sys
+    import types
+
+    puts = []
+    s3 = types.SimpleNamespace(put_object=lambda **k: puts.append(k["Key"]))
+    monkeypatch.setitem(sys.modules, "boto3", types.SimpleNamespace(Session=lambda **k: types.SimpleNamespace(client=lambda n: s3)))
+    monkeypatch.setenv("BUCKET", "b")
+    sys.modules.pop("diagnose", None)
+    import diagnose
+
+    names = [s["name"] for s in fixer.gateway_schemas()]
+    assert names[-1] == "decide" and "release_notes" not in names          # nothing local is offered on the Gateway
+    assert "error" in diagnose.lambda_handler({"__tool": "x___machine_log", "stack": "other-team-stack"}, None)
+    assert "error" in diagnose.lambda_handler({"__tool": "my_permissions"}, None)             # whose permissions must be said
+    assert "error" in diagnose.lambda_handler({"__tool": "release_notes"}, None)
+    v = diagnose.lambda_handler({"__tool": "decide", "side": "customer", "step": "Call it", "action": "onboard", "sure": "yes"}, None)
+    assert v["action"] == "ask_human" and puts == [v["record"]] and v["record"].startswith("deploy/watch/")
+    assert "error" in diagnose.lambda_handler({"__tool": "decide", "side": "root", "action": "retry"}, None) and len(puts) == 1

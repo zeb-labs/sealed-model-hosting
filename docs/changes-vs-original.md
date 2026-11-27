@@ -54,13 +54,16 @@ not mention the web terminal.
 | Customer-side model copy | The encrypted model can sit in the customer's own bucket; it is unreadable without the builder's key. | Run |
 | Stable endpoint | An internal load balancer gives the endpoint a name that survives restarts. | Run |
 | Release agent | An AI agent (AWS AgentCore) runs the builder's release steps through fixed tools. It cannot write a key rule or read a secret. | Run |
-| Watcher agent | An AI agent that is called when any step fails, on either side. It investigates with read-only tools, applies a fix from a short fixed list, or tells the person exactly what to do, then the step runs again. | Run: a customer with no key access, a gated model, no free GPU machine (fixed by itself), a fine-tune over the limit, and a real AWS "access denied" (a restricted role that could not create stacks: it named the exact missing actions). |
+| Watcher agent (on AWS AgentCore since 27 Nov, as its own harness with read-only tools) | An AI agent that is called when any step fails, on either side. It investigates with read-only tools, applies a fix from a short fixed list, or tells the person exactly what to do, then the step runs again. | Run: a customer with no key access, a gated model, no free GPU machine (fixed by itself), a fine-tune over the limit, and a real AWS "access denied" (a restricted role that could not create stacks: it named the exact missing actions). |
 | Any open model, or the builder's own weights | `ship` takes a Hugging Face model by name, or a folder with the builder's own weights (disk, network share or S3). The own weights are staged, encrypted, and the staged copy is deleted. | Run: an open model by name (Qwen2.5-1.5B) and the builder's own weights from a folder (a Llama-architecture model, SmolLM2-360M, standing in for a self-trained one) were each released, served and fine-tuned. |
+| One-command first-time setup | `bash smh.sh setup` creates the builder's fixed pieces that are missing and sets up both agents; the release agent then prepares the build machine with one fixed script (tools, Secure Boot keys, signed NVIDIA driver, lease secret). | Run in our account, where every piece existed, and the script on a fresh second build machine, which then built a sealed image. Not run from an empty account. |
+| Settings, not our account | Account, profile, region and owner tag come from one file, `smh.env`. | Run with our values only. |
 | Cost guard | Tracks spend, stops the project's machines nightly and near the budget. | Run |
 
 ## Not done, said plainly
 
 - **One AWS account.** Builder and customers are separate sets of resources in one account. The real wall needs a second account. Not tried.
+- **The customer's side is not driven by an agent.** A script creates the one stack; the watcher on AgentCore looks after it.
 - **Two small models so far**, of two architectures (Qwen2 and Llama), one by name and one from a folder. Both are small and run on one GPU; a large model, a multi-GPU model and other architectures are untested. Gated or private Hugging Face models cannot be fetched by name; ship their weights from a folder instead. An own model from an `s3://` location uses the same path as a folder but was not run.
 - **The build is not reproducible yet**, so a customer cannot rebuild the image and compare.
 - **Secure Boot uses test keys.** The endpoint certificate is self-signed per boot.

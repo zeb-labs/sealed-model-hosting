@@ -19,15 +19,15 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import checks  # noqa: E402
 
 KNOWN_OPEN = {"S10": "Reproducible build, open since M2"}
-ACCOUNT = "111122223333"
+ACCOUNT, REGION = os.environ.get("SMH_ACCOUNT", "111122223333"), os.environ.get("SMH_REGION", "us-east-1")
 SEALED_ROLE = f"arn:aws:iam::{ACCOUNT}:role/zl/smh-poc-sealed-instance-role"
 CUSTOMER_BUCKET = f"smh-poc-customer-{ACCOUNT}"
 ROLE_ALLOWED = {
     "s3:GetObject": [f"arn:aws:s3:::smh-poc-artifacts-{ACCOUNT}/", f"arn:aws:s3:::{CUSTOMER_BUCKET}/"],
     "s3:PutObject": [f"arn:aws:s3:::{CUSTOMER_BUCKET}/"],
     "s3:ListBucket": [f"arn:aws:s3:::{CUSTOMER_BUCKET}"],
-    "logs:CreateLogStream": [f"arn:aws:logs:us-east-1:{ACCOUNT}:log-group:/smh-poc/customer/"],
-    "logs:PutLogEvents": [f"arn:aws:logs:us-east-1:{ACCOUNT}:log-group:/smh-poc/customer/"],
+    "logs:CreateLogStream": [f"arn:aws:logs:{REGION}:{ACCOUNT}:log-group:/smh-poc/customer/"],
+    "logs:PutLogEvents": [f"arn:aws:logs:{REGION}:{ACCOUNT}:log-group:/smh-poc/customer/"],
 }
 USERDATA_MARKER = "SMH-USERDATA-RAN"
 BREAK_SIGNS = {

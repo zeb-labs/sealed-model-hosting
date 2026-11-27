@@ -73,6 +73,15 @@ What keeps it safe:
 - It never proposes turning a protection off or widening a role.
 - Every case is saved in `evidence/watcher/`: what failed, what it looked at, what it decided.
 
+**Where it runs.** The watcher is an agent on AWS AgentCore (harness
+`smh_poc_watcher`), separate from the release agent on purpose: text from a
+log can reach the watcher, and the watcher can change nothing. Its tools sit
+behind its own gateway, in a function whose role can only read. Each decision
+is also written to the builder's bucket under `deploy/watch/`, and every tool
+call to the function's log. If the harness does not answer, the same
+investigation runs from the laptop with the same model, and if the model
+cannot be reached, plain rules answer.
+
 **Setting it up (required once).** The watcher needs to know which Claude
 model on Bedrock to use. Copy `smh.env.example` to `smh.env` and replace the
 placeholder with an inference profile your account may use:
@@ -106,28 +115,54 @@ cd ..
 bash smh.sh status                                # shows the release, what is running, the spend
 ```
 
-Every script stops by itself if the account is not `111122223333`.
+Every script stops by itself if the credentials are for another account than `SMH_ACCOUNT` in `smh.env` (default: ours, `111122223333`).
 
-## 2. First-time setup of the account
+## 2. First-time setup of the builder's side
 
-In our account this is **already done**. You only need this section to
-understand what exists, or to rebuild after a full clean-up.
+One command:
 
-**Not run from an empty account in one go.** The pieces below were created
-one milestone at a time. The order is the order they depend on each other.
+```bash
+cp smh.env.example smh.env      # once: your account, profile, region, owner tag and the agents' model
+bash smh.sh setup
+```
 
-| Step | Command | Creates |
+It is safe to run again: what exists is left alone. It does three things.
+
+**1. Creates the fixed pieces that are missing** (CloudFormation, with your own AWS user):
+
+| Piece | Stack | What it is |
 | --- | --- | --- |
-| 1 | `bash infra/cost-guard/deploy.sh` | Spend tracking, an email alert, a nightly stop (21:00 IST) and a stop at 450 USD |
-| 2 | `bash infra/m1/deploy.sh base` | Builder network, first customer network, the builder's bucket, the two machine roles |
-| 3 | `bash infra/m1/deploy.sh key` and `... lease` | The model key and the lease key. They release nothing until a release is approved. |
-| 4 | `bash infra/m1/deploy.sh customer` | The first customer's own key and bucket |
-| 5 | `bash infra/m1/deploy.sh builder` | The build machine (stopped when idle). It holds the TEST Secure Boot keys and the lease secret on its disk. |
-| 6 | `MODEL=<your Bedrock inference profile> bash deployer/setup.sh` | The release agent (AWS AgentCore). It thinks with the Claude model you name; nothing else is created for it. |
+| Cost guard | `smh-poc-cost-guard` | Spend tracking, an email alert, a nightly stop and a stop near the budget |
+| Base | `smh-poc-m1-base` | The builder's network and bucket, the machine roles |
+| Keys | `smh-poc-m1-key`, `smh-poc-m1-lease` | The model key and the lease key. They release nothing until a release is approved. |
+| First customer | `smh-poc-m1-customer` | A customer of your own, for tests and the demo |
+| Build machine | `smh-poc-m1-builder` | Stopped when idle |
 
-Details for each step are in `docs/m1-plan.md` to `docs/m7-plan.md`.
+**2. Sets up the two agents on AWS AgentCore** (`deployer/setup.sh`): the release
+agent and the watcher. Each is a harness that may call only its own gateway.
+Both think with the Claude inference profile you named; nothing is created for it.
 
-Rules that always apply (the full list is in `CLAUDE.md`):
+**3. The release agent prepares the build machine.** It checks that every piece
+is there, starts the machine, runs ONE fixed script on it
+(`image/pipeline/bootstrap-builder.sh`), reads back the result and stops the
+machine. The script installs the build tools from the Amazon Linux repository,
+makes the Secure Boot keys, builds the NVIDIA driver for the kernel the image
+will get and signs it, downloads and verifies the driver packages, and makes
+the lease secret. It never replaces a key or the lease secret.
+
+**Your own Secure Boot keys.** Before the first run, put `PK.key PK.crt KEK.key
+KEK.crt db.key db.crt` into `/opt/smh/sb` on the build machine (root only).
+Whatever is missing there is made as a TEST key, and the agent says so.
+
+**If a step fails**, the watcher looks into it and tells you what to do, as for
+every other command (section 0).
+
+What was run and what was not is in `docs/m12-plan.md`. In short: in our
+account every piece already existed, so the command was run as a check and a
+repair, and the bootstrap script was run on a fresh second build machine. A
+whole empty account in one go was not run.
+
+Rules that always apply in our own account (the full list is in `CLAUDE.md`):
 
 - Every resource is named `smh-poc-*` and carries the six required tags.
 - IAM roles use the path `/zl/`.

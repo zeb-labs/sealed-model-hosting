@@ -12,11 +12,7 @@ Parameters:
   CodeKey: {Type: String}            # deployer zip in the artifacts bucket
   ModelArn: {Type: String}           # the Bedrock model or inference profile the agent uses
   FoundationModelArn: {Type: String, Default: "arn:aws:bedrock:*::foundation-model/anthropic.*"}
-
-Mappings:
-  Tags:
-    Six:
-      Json: '{"business-unit":"ai","env":"innovation","category":"rnd","owner":"owner@example.com","app":"Secure-model-hosting","expire-date":"recurring"}'
+  Owner: {Type: String, Default: owner@example.com}     # the owner tag our machines carry (SMH_OWNER in smh.env)
 
 Resources:
   # ---------- the one thing that can run on our machines ----------
@@ -25,12 +21,13 @@ Resources:
     Properties:
       Name: smh-poc-pipeline-step
       DocumentType: Command
+      UpdateMethod: NewVersion      # a changed step list becomes a new default version; a named document cannot be replaced
       DocumentFormat: YAML
       Content:
         schemaVersion: "2.2"
         description: smh-poc deployer. Runs ONE fixed pipeline step. Every input is checked against a list or a pattern.
         parameters:
-          Step: {type: String, allowedValues: [lock, build, register, check, package, pin]}
+          Step: {type: String, allowedValues: [lock, build, register, check, package, pin, setup]}
           Version: {type: String, allowedPattern: "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$"}
           Prefix: {type: String, allowedPattern: "^m[0-9a-z-]{1,20}$"}
           Model: {type: String, allowedPattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,60}/[A-Za-z0-9][A-Za-z0-9._-]{0,90}$"}
@@ -98,7 +95,7 @@ Resources:
                 Action: ssm:SendCommand
                 Resource: !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
                 Condition:
-                  StringEquals: {"ssm:resourceTag/app": Secure-model-hosting, "ssm:resourceTag/owner": owner@example.com}
+                  StringEquals: {"ssm:resourceTag/app": Secure-model-hosting, "ssm:resourceTag/owner": !Ref Owner}
               - Sid: ReadCommandAndMachineState
                 Effect: Allow
                 Action: [ssm:GetCommandInvocation, ssm:DescribeInstanceInformation, ec2:DescribeInstances]
@@ -108,15 +105,20 @@ Resources:
                 Action: [ec2:StartInstances, ec2:StopInstances]
                 Resource: !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
                 Condition:
-                  StringEquals: {"aws:ResourceTag/app": Secure-model-hosting, "aws:ResourceTag/owner": owner@example.com}
+                  StringEquals: {"aws:ResourceTag/app": Secure-model-hosting, "aws:ResourceTag/owner": !Ref Owner}
               - Sid: TheHelperStackAndReadingTheBuilderStack
                 Effect: Allow
                 Action: [cloudformation:CreateStack, cloudformation:DeleteStack, cloudformation:DescribeStacks, cloudformation:DescribeStackEvents]
                 Resource:
                   - !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/smh-poc-m1-gpu-helper/*
               - Effect: Allow
-                Action: cloudformation:DescribeStacks
-                Resource: !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/smh-poc-m1-builder/*
+                Action: cloudformation:DescribeStacks      # the fixed pieces of the builder's side: are they there
+                Resource:
+                  - !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/smh-poc-m1-builder/*
+                  - !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/smh-poc-m1-base/*
+                  - !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/smh-poc-m1-key/*
+                  - !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/smh-poc-m1-lease/*
+                  - !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/smh-poc-cost-guard/*
               - Sid: HandTheHelperStackToItsOwnRole
                 Effect: Allow
                 Action: iam:PassRole
@@ -141,7 +143,7 @@ Resources:
           BUCKET: !Sub smh-poc-artifacts-${AWS::AccountId}
           DOCUMENT: !Ref StepDocument
           CFN_ROLE: !GetAtt HelperStackRole.Arn
-          TAGS: !FindInMap [Tags, Six, Json]
+          TAGS: !Sub '{"business-unit":"ai","env":"innovation","category":"rnd","owner":"${Owner}","app":"Secure-model-hosting","expire-date":"recurring"}'
 
   # ---------- CloudFormation's own role for the GPU helper stack ----------
   HelperStackRole:
@@ -186,7 +188,7 @@ Resources:
                 Action: ec2:TerminateInstances
                 Resource: "*"
                 Condition:
-                  StringEquals: {"aws:ResourceTag/app": Secure-model-hosting, "aws:ResourceTag/owner": owner@example.com}
+                  StringEquals: {"aws:ResourceTag/app": Secure-model-hosting, "aws:ResourceTag/owner": !Ref Owner}
               - Effect: Allow
                 Action: iam:PassRole
                 Resource: !ImportValue smh-poc-builder-role-arn
@@ -209,7 +211,7 @@ Resources:
             Action: [ec2:AttachVolume, ec2:DetachVolume, ec2:DeleteVolume]
             Resource: "*"
             Condition:
-              StringEquals: {"aws:ResourceTag/app": Secure-model-hosting, "aws:ResourceTag/owner": owner@example.com}
+              StringEquals: {"aws:ResourceTag/app": Secure-model-hosting, "aws:ResourceTag/owner": !Ref Owner}
           - Sid: PinTheTwoKeyStacksWithTheSameTemplate
             Effect: Allow
             Action: [cloudformation:UpdateStack, cloudformation:DescribeStacks]

@@ -4,13 +4,13 @@
 # blank disk -> attach to this machine -> write image -> snapshot -> register.
 #   VERSION=0.7.0 bash register-image.sh        prints "AMI ami-... SNAPSHOT snap-..."
 set -euo pipefail
-: "${VERSION:?version}"; WORK=${WORK:-/mnt/m5}; REGION=us-east-1
+: "${VERSION:?version}"; WORK=${WORK:-/mnt/m5}; REGION="${SMH_REGION:-us-east-1}"
 A="aws --region $REGION --no-cli-pager"
 RAW=$(ls "$WORK"/signed/*.raw); [ "$(echo "$RAW" | wc -l)" = 1 ] || { echo "expected exactly one signed image"; exit 1; }
 TOK=$(curl -s -X PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 60')
 md() { curl -s -H "X-aws-ec2-metadata-token: $TOK" "http://169.254.169.254/latest/meta-data/$1"; }
 IID=$(md instance-id); AZ=$(md placement/availability-zone)
-T="{Key=business-unit,Value=ai},{Key=env,Value=innovation},{Key=category,Value=rnd},{Key=owner,Value=owner@example.com},{Key=app,Value=Secure-model-hosting},{Key=expire-date,Value=recurring}"
+T="{Key=business-unit,Value=ai},{Key=env,Value=innovation},{Key=category,Value=rnd},{Key=owner,Value=${SMH_OWNER:-owner@example.com}},{Key=app,Value=Secure-model-hosting},{Key=expire-date,Value=recurring}"
 GB=$(( ($(stat -c %s "$RAW") + (1 << 30) - 1) >> 30 ))
 
 VOL=$($A ec2 create-volume --availability-zone "$AZ" --size "$GB" --volume-type gp3 \

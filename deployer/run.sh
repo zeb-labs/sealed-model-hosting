@@ -6,8 +6,8 @@
 # OUT (transcript file, default evidence/m7/transcript.txt).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-A="aws --profile poc-ino --region us-east-1 --no-cli-pager"; B="s3://smh-poc-artifacts-111122223333/build/src"
-[ "$($A sts get-caller-identity --query Account --output text)" = "111122223333" ] || { echo "STOP: wrong account"; exit 1; }
+A="aws --profile ${SMH_PROFILE:-poc-ino} --region ${SMH_REGION:-us-east-1} --no-cli-pager"; B="s3://smh-poc-artifacts-${SMH_ACCOUNT:-111122223333}/build/src"
+[ "$($A sts get-caller-identity --query Account --output text)" = "${SMH_ACCOUNT:-111122223333}" ] || { echo "STOP: wrong account"; exit 1; }
 # The machines run the sources from the bucket: send the current ones first.
 for d in image infra assure; do $A s3 sync --only-show-errors --delete --exact-timestamps --exclude "*__pycache__*" --exclude ".DS_Store" --exclude "*.pytest_cache*" "$d/" "$B/$d/"; done
 $A s3 sync --only-show-errors --delete --exact-timestamps --exclude "*__pycache__*" sealed-model-poc/sealbox/ "$B/sealbox/"

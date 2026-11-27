@@ -41,7 +41,13 @@ STEPS: Dict[str, tuple] = {
 }
 # Fields a step's result file may contribute to an answer. Anything else is dropped.
 RESULT_FIELDS = ("ok", "exit", "ami", "snapshot", "pcr4", "pcr7", "pcr12", "pcr15_open", "pcr15_locked", "packages",
-                 "image_check", "summary_sha256", "checks", "sizes", "stacks")
+                 "image_check", "summary_sha256", "checks", "sizes", "stacks",
+                 "ready", "keys", "kernel", "driver", "lease_secret", "disk_free_gib")
+# First-time setup is not a release: its state lives under this fixed name.
+SETUP = "0.0.0"
+# The fixed pieces of the builder's side, in the order they depend on each other. The person's own command
+# (bash smh.sh setup) creates them; the agent can see them, and it prepares the build machine itself.
+PIECES = ("smh-poc-cost-guard", "smh-poc-m1-base", "smh-poc-m1-key", "smh-poc-m1-lease", "smh-poc-m1-builder")
 MUST_PASS_BEFORE_APPROVAL = ("S4", "S5", "S6", "S7", "S8", "S9")
 
 
@@ -60,6 +66,7 @@ class Cloud:
     machine_up: Callable[[str, str], None]                # (machine, gpu type)
     machine_down: Callable[[str], None]
     model_info: Callable[[str], Dict[str, Any]]           # Hugging Face's public description of a model
+    stack_state: Callable[[str], str]                     # one of PIECES -> ready | absent | <its CloudFormation status>
 
 
 def _check(value: Any, pattern: "re.Pattern[str]", what: str) -> str:
@@ -135,6 +142,8 @@ def choose_machine(cloud: Cloud, weights_bytes: int) -> Dict[str, Any]:
 
 def start_deployment(cloud: Cloud, version: str, model: str, prefix: str, gpu: str) -> Dict[str, Any]:
     _check(version, VERSION, "version"); _check(model, MODEL, "model name"); _check(prefix, PREFIX, "folder")
+    if version == SETUP:
+        raise Refused("version 0.0.0 is kept for first-time setup; use another")
     if gpu not in [name for name, _ in MACHINES]:
         raise Refused("machine type is not in the table")
     wanted = {"version": version, "model": model, "prefix": prefix, "gpu": gpu}
@@ -189,6 +198,45 @@ def _start(cloud: Cloud, state: Dict[str, Any], version: str, step: str) -> Dict
     state.setdefault("commands", {})[step] = {"id": command, "machine": where}
     cloud.put(f"deploy/{version}/state.json", json.dumps(state).encode())
     return {"step": step, "state": "running"}
+
+
+def environment(cloud: Cloud) -> Dict[str, Any]:
+    """What exists of the builder's side, and whether the build machine is prepared."""
+    state = _json(cloud, f"deploy/{SETUP}/state.json") or {"commands": {}}
+    return {"pieces": {name: cloud.stack_state(name) for name in PIECES},
+            "build_machine": cloud.machine_state("builder") if cloud.stack_state("smh-poc-m1-builder") == "ready" else "absent",
+            "preparation": _step_state(cloud, state, SETUP, "setup"),
+            "missing_pieces_are_created_by": "the person's own command: bash smh.sh setup"}
+
+
+def prepare_builder(cloud: Cloud) -> Dict[str, Any]:
+    """Install the build tools, keys and driver on the build machine. One fixed script; safe to run again."""
+    state = _json(cloud, f"deploy/{SETUP}/state.json") or {"version": SETUP, "model": "none/none", "prefix": "m0", "gpu": MACHINES[0][0], "commands": {}}
+    if _step_state(cloud, state, SETUP, "setup")["state"] == "running":
+        raise Refused("the preparation is already running")
+    if cloud.machine_state("builder") != "online":
+        raise Refused("the builder is not online; bring it up first with builder_power")
+    cloud.put(f"deploy/{SETUP}/setup.json", json.dumps({"ok": False, "exit": None}).encode())
+    command = cloud.send_step("builder", "setup", SETUP, state["prefix"], state["model"], state["gpu"])
+    state["commands"]["setup"] = {"id": command, "machine": "builder"}
+    cloud.put(f"deploy/{SETUP}/state.json", json.dumps(state).encode())
+    return {"step": "setup", "state": "running", "takes": "about 15 minutes on a fresh machine, 1 minute when everything is already there"}
+
+
+def builder_power(cloud: Cloud, action: str) -> Dict[str, Any]:
+    """The build machine on or off, outside a release (first-time setup)."""
+    if action not in ("up", "down"):
+        raise Refused("action must be up or down")
+    if cloud.stack_state("smh-poc-m1-builder") != "ready":
+        raise Refused("there is no build machine yet; the person runs: bash smh.sh setup")
+    if action == "down":
+        state = _json(cloud, f"deploy/{SETUP}/state.json") or {"commands": {}}
+        if _step_state(cloud, state, SETUP, "setup")["state"] == "running":
+            raise Refused("the preparation is still running on the builder")
+        cloud.machine_down("builder")
+    else:
+        cloud.machine_up("builder", MACHINES[0][0])
+    return {"machine": "builder", "state": cloud.machine_state("builder")}
 
 
 def get_status(cloud: Cloud, version: str) -> Dict[str, Any]:
@@ -249,6 +297,7 @@ TOOLS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "profile_model": profile_model, "choose_machine": choose_machine, "start_deployment": start_deployment,
     "machine": machine, "start_step": start_step, "get_status": get_status,
     "request_approval": request_approval, "pin_keys": pin_keys,
+    "environment": environment, "builder_power": builder_power, "prepare_builder": prepare_builder,
 }
 
 _V = {"type": "string", "description": "Version like 0.7.0"}
@@ -273,6 +322,12 @@ SCHEMAS: List[Dict[str, Any]] = [
      "inputSchema": {"type": "object", "properties": {"version": _V}, "required": ["version"]}},
     {"name": "pin_keys", "description": "Write both key policies for this build from the pipeline's own output. Refuses unless a human has approved exactly this build.",
      "inputSchema": {"type": "object", "properties": {"version": _V}, "required": ["version"]}},
+    {"name": "environment", "description": "First-time setup: which fixed pieces of the builder's side exist, the build machine's state, and the result of its preparation (ready, keys, kernel, driver, lease_secret).",
+     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "builder_power", "description": "First-time setup only: bring the build machine up or down outside a release.",
+     "inputSchema": {"type": "object", "properties": {"action": {"type": "string", "enum": ["up", "down"]}}, "required": ["action"]}},
+    {"name": "prepare_builder", "description": "First-time setup: run the ONE fixed preparation script on the build machine (build tools, Secure Boot keys, NVIDIA driver for the image's kernel, lease secret). It never replaces a key. Safe to run again. The builder must be online.",
+     "inputSchema": {"type": "object", "properties": {}}},
 ]
 
 

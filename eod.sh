@@ -5,7 +5,7 @@
 # Deleting is never automatic: do it per resource, after the owner says yes.
 set -euo pipefail
 
-PROFILE="poc-ino"; ACCOUNT="111122223333"; REGION="us-east-1"
+PROFILE="${SMH_PROFILE:-poc-ino}"; ACCOUNT="${SMH_ACCOUNT:-111122223333}"; REGION="${SMH_REGION:-us-east-1}"
 TAG_KEY="app"; TAG_VALUE="Secure-model-hosting"
 A="aws --profile $PROFILE --region $REGION --no-cli-pager"
 

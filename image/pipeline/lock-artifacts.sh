@@ -20,7 +20,7 @@ cp "$SRC/image/m4/Dockerfile" "$SRC/image/m4/train.py" $D/build/
 echo "$PEFT" > $D/peft-version.txt
 
 echo "== 2. model $MODEL =="
-BUCKET=smh-poc-artifacts-111122223333; REGION=us-east-1; OWN=""; MODELARG="$MODEL"; MOUNT=""
+BUCKET=smh-poc-artifacts-${SMH_ACCOUNT:-111122223333}; REGION="${SMH_REGION:-us-east-1}"; OWN=""; MODELARG="$MODEL"; MOUNT=""
 if [[ "$MODEL" == local/* ]]; then
   # The builder's OWN weights (from their disk, a network share or their own store), staged by `smh.sh ship <folder>`.
   OWN="deploy/models-in/${MODEL#local/}"; rm -rf $D/own; mkdir -p $D/own

@@ -3,7 +3,7 @@
 # Reads the usage records (allowed) and checks seals and numbering. Then shows
 # that the builder's role cannot read anything else on the customer's side.
 set -uo pipefail
-REGION=us-east-1; CUSTOMER=smh-poc-customer-111122223333; D=/mnt/m5/usage
+REGION="${SMH_REGION:-us-east-1}"; CUSTOMER=smh-poc-customer-${SMH_ACCOUNT:-111122223333}; D=/mnt/m5/usage
 rm -rf "$D"; mkdir -p "$D"
 aws s3 sync --only-show-errors --region $REGION "s3://$CUSTOMER/usage/" "$D/"
 od -An -v -tx1 /opt/smh/lease/seal.key | tr -d ' \n' | PYTHONPATH=/opt/smh/src python3 -m sealbox.meter check "$D"

@@ -4,14 +4,14 @@
 #   bash infra/m1/publish-image.sh <label>      e.g. m1-0.1.0
 # Prints the AMI id. The temporary disk is deleted at the end.
 set -euo pipefail
-PROFILE="poc-ino"; ACCOUNT="111122223333"; REGION="us-east-1"
+PROFILE="${SMH_PROFILE:-poc-ino}"; ACCOUNT="${SMH_ACCOUNT:-111122223333}"; REGION="${SMH_REGION:-us-east-1}"
 A="aws --profile $PROFILE --region $REGION --no-cli-pager"
 DIR="$(cd "$(dirname "$0")" && pwd)"
 LABEL="${1:?label, e.g. m1-0.1.0}"
 RAW="${RAW:-/mnt/image/smh-sealed.x86_64-0.1.0.raw}"
 [ "$($A sts get-caller-identity --query Account --output text)" = "$ACCOUNT" ] || { echo "STOP: wrong account"; exit 1; }
 
-T="{Key=business-unit,Value=ai},{Key=env,Value=innovation},{Key=category,Value=rnd},{Key=owner,Value=owner@example.com},{Key=app,Value=Secure-model-hosting},{Key=expire-date,Value=recurring}"
+T="{Key=business-unit,Value=ai},{Key=env,Value=innovation},{Key=category,Value=rnd},{Key=owner,Value=${SMH_OWNER:-owner@example.com}},{Key=app,Value=Secure-model-hosting},{Key=expire-date,Value=recurring}"
 out() { $A cloudformation describe-stacks --stack-name smh-poc-m1-builder --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text; }
 IID="$(out InstanceId)"; AZ="$(out Az)"
 

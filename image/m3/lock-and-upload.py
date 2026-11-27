@@ -7,12 +7,12 @@ exists only in this process's memory.
   m3/model-config.sbox    config and tokenizer files (a tar)
   m3/model-server.sbox    our model-server container image (docker save | zstd)
 """
-import base64, hashlib, io, json, subprocess, sys, tarfile, time
+import base64, hashlib, io, json, os, subprocess, sys, tarfile, time
 
 sys.path.insert(0, "/data/src")
 from sealbox import envelope
 
-REGION, BUCKET, PREFIX = "us-east-1", "smh-poc-artifacts-111122223333", "m3"
+REGION, BUCKET, PREFIX = os.environ.get("SMH_REGION", "us-east-1"), "smh-poc-artifacts-" + os.environ.get("SMH_ACCOUNT", "111122223333"), "m3"
 OUT = "/data/upload"
 subprocess.run(["mkdir", "-p", OUT], check=True)
 

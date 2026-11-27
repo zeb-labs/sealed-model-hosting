@@ -102,6 +102,12 @@ class Real(tools.Cloud):
             return "failed"                          # the machine is gone, or the command expired
         return {"Pending": "running", "InProgress": "running", "Delayed": "running", "Success": "done"}.get(status, "failed")
 
+    def stack_state(self, name):
+        stack = self._stack(name)
+        if not stack:
+            return "absent"
+        return "ready" if stack["StackStatus"] in ("CREATE_COMPLETE", "UPDATE_COMPLETE") else stack["StackStatus"]
+
     def model_info(self, model):
         if model.startswith("local/"):        # the builder's own weights, staged by `smh.sh ship <folder>`; no Hugging Face involved
             body = self.get(f"deploy/models-in/{model[len('local/'):]}/model-info.json")

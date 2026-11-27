@@ -18,7 +18,7 @@ from typing import Any, Dict, List
 import os as _os
 
 # On the laptop: the poc-ino profile. On the builder (SMH_PROFILE set to nothing): its own role.
-PROFILE, REGION, ACCOUNT = _os.environ.get("SMH_PROFILE", "poc-ino"), "us-east-1", "111122223333"
+PROFILE, REGION, ACCOUNT = _os.environ.get("SMH_PROFILE", "poc-ino"), _os.environ.get("SMH_REGION", "us-east-1"), _os.environ.get("SMH_ACCOUNT", "111122223333")
 ARTIFACTS, CUSTOMER = f"smh-poc-artifacts-{ACCOUNT}", f"smh-poc-customer-{ACCOUNT}"
 CUSTOMER_VPC_NAME = "smh-poc-customer-vpc"
 

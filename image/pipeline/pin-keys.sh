@@ -4,7 +4,7 @@
 # human's approval record names exactly that file's fingerprint (the Lambda
 # checks this too; this is the second lock).
 set -euo pipefail
-: "${VERSION:?version}"; REGION=us-east-1; BUCKET=smh-poc-artifacts-111122223333
+: "${VERSION:?version}"; REGION="${SMH_REGION:-us-east-1}"; BUCKET=smh-poc-artifacts-${SMH_ACCOUNT:-111122223333}
 A="aws --region $REGION --no-cli-pager"; T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 $A s3 cp --only-show-errors "s3://$BUCKET/build/out-$VERSION/summary.json" "$T/summary.json"
 $A s3 cp --only-show-errors "s3://$BUCKET/approvals/$VERSION.json" "$T/approval.json" || { echo "NOT APPROVED"; exit 3; }

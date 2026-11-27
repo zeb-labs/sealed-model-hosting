@@ -10,7 +10,7 @@
 #   SOURCE=s3://bucket/folder HIBERNATE=true|false ... bash infra/m1/deploy.sh test    optional launch settings (M9)
 #   bash infra/m1/deploy.sh ssm-endpoints     TEST ONLY: Systems Manager endpoints for suite test B7
 set -euo pipefail
-PROFILE="poc-ino"; ACCOUNT="111122223333"; REGION="us-east-1"
+PROFILE="${SMH_PROFILE:-poc-ino}"; ACCOUNT="${SMH_ACCOUNT:-111122223333}"; REGION="${SMH_REGION:-us-east-1}"
 A="aws --profile $PROFILE --region $REGION --no-cli-pager"
 DIR="$(cd "$(dirname "$0")" && pwd)"
 WHICH="${1:?base or key}"; STACK="smh-poc-m1-$WHICH"
@@ -66,12 +66,12 @@ fi
 # The six tags the SCP requires. Stack tags are copied onto every resource.
 $A cloudformation deploy --stack-name "$STACK" --template-file "$DIR/$TEMPLATE.yaml" \
   --capabilities CAPABILITY_NAMED_IAM --no-fail-on-empty-changeset ${PARAMS[@]+"${PARAMS[@]}"} \
-  --tags business-unit=ai env=innovation category=rnd owner=owner@example.com app=Secure-model-hosting expire-date=recurring
+  --tags business-unit=ai env=innovation category=rnd owner=${SMH_OWNER:-owner@example.com} app=Secure-model-hosting expire-date=recurring
 # CloudFormation cannot tag instance profiles, so tag them here.
 PROFILES=""; [ "$WHICH" = "base" ] && PROFILES="smh-poc-builder-profile smh-poc-sealed-instance-profile"; [ "$WHICH" = "client" ] && PROFILES="smh-poc-client-profile"
 if [ -n "$PROFILES" ]; then
   for p in $PROFILES; do
-    $A iam tag-instance-profile --instance-profile-name "$p" --tags Key=business-unit,Value=ai Key=env,Value=innovation Key=category,Value=rnd Key=owner,Value=owner@example.com Key=app,Value=Secure-model-hosting Key=expire-date,Value=recurring
+    $A iam tag-instance-profile --instance-profile-name "$p" --tags Key=business-unit,Value=ai Key=env,Value=innovation Key=category,Value=rnd Key=owner,Value=${SMH_OWNER:-owner@example.com} Key=app,Value=Secure-model-hosting Key=expire-date,Value=recurring
   done
 fi
 $A cloudformation describe-stacks --stack-name "$STACK" --query 'Stacks[0].[StackStatus,Outputs]' --output json

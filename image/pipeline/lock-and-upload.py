@@ -15,7 +15,7 @@ import base64, hashlib, io, json, os, subprocess, sys, tarfile, time
 sys.path.insert(0, "/opt/smh/src")
 from sealbox import envelope
 
-REGION, BUCKET = "us-east-1", "smh-poc-artifacts-111122223333"
+REGION, BUCKET = os.environ.get("SMH_REGION", "us-east-1"), "smh-poc-artifacts-" + os.environ.get("SMH_ACCOUNT", "111122223333")
 PREFIX, MODEL = os.environ["PREFIX"], os.environ["MODEL"]
 OUT = "/data/upload"
 subprocess.run(["mkdir", "-p", OUT], check=True)

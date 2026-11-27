@@ -72,7 +72,7 @@ Resources:
                 Condition:
                   StringEquals:
                     aws:ResourceTag/app: Secure-model-hosting
-                    aws:ResourceTag/owner: owner@example.com
+                    aws:ResourceTag/owner: !Ref AlertEmail     # the owner tag is the alert address
               - Effect: Allow
                 Action: [ssm:GetParameter, ssm:PutParameter]
                 Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/smh-poc/cost-guard/state
@@ -94,6 +94,7 @@ Resources:
       Role: !GetAtt GuardRole.Arn
       Environment:
         Variables:
+          OWNER: !Ref AlertEmail
           STATE: /smh-poc/cost-guard/state
           TOPIC: !Ref Alerts
           LIMIT: !Ref LimitUsd
@@ -111,7 +112,7 @@ Resources:
                    "c6i.2xlarge": 0.34, "m6i.large": 0.096}
           UNKNOWN = 5.0  # shortcut: conservative rate for unlisted types; add the type to RATES
           FILTERS = [{"Name": "tag:app", "Values": ["Secure-model-hosting"]},
-                     {"Name": "tag:owner", "Values": ["owner@example.com"]},
+                     {"Name": "tag:owner", "Values": [E["OWNER"]]},
                      {"Name": "instance-state-name", "Values": ["pending", "running"]}]
 
           def say(subject, msg):

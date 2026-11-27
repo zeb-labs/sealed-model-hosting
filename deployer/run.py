@@ -7,6 +7,7 @@ The agent ends every turn with a STATUS line; WORKING means ask again later.
 """
 import argparse
 import json
+import os
 import sys
 import time
 import uuid
@@ -19,7 +20,7 @@ p.add_argument("--rounds", type=int, default=1); p.add_argument("--pause", type=
 p.add_argument("--out", default=None)
 args = p.parse_args()
 arn = open("deployer/.harness").read().split()[-1]
-client = boto3.Session(profile_name="poc-ino", region_name="us-east-1").client("bedrock-agentcore")
+client = boto3.Session(profile_name=os.environ.get("SMH_PROFILE", "poc-ino"), region_name=os.environ.get("SMH_REGION", "us-east-1")).client("bedrock-agentcore")
 out = open(args.out, "a") if args.out else None
 
 

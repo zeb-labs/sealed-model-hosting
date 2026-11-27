@@ -5,8 +5,8 @@
 # write that record; the deployer's roles are denied.
 #   bash deployer/approve.sh 0.7.0
 set -euo pipefail
-V="${1:?version}"; PROFILE="poc-ino"; ACCOUNT="111122223333"
-A="aws --profile $PROFILE --region us-east-1 --no-cli-pager"; B="s3://smh-poc-artifacts-$ACCOUNT"
+V="${1:?version}"; PROFILE="${SMH_PROFILE:-poc-ino}"; ACCOUNT="${SMH_ACCOUNT:-111122223333}"
+A="aws --profile $PROFILE --region ${SMH_REGION:-us-east-1} --no-cli-pager"; B="s3://smh-poc-artifacts-$ACCOUNT"
 [ "$($A sts get-caller-identity --query Account --output text)" = "$ACCOUNT" ] || { echo "STOP: wrong account"; exit 1; }
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 $A s3 cp --only-show-errors "$B/deploy/$V/approval-request.json" "$T/request.json" || { echo "no approval request for $V"; exit 1; }

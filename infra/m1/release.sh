@@ -6,10 +6,10 @@
 # Writes <evidence dir>/ami-id.txt ("ami snap"). Each step logs to its own file.
 set -euo pipefail
 VERSION="$1"; WORK="$2"; LABEL="$3"; EV="$4"
-A="aws --profile poc-ino --region us-east-1 --no-cli-pager"
+A="aws --profile ${SMH_PROFILE:-poc-ino} --region ${SMH_REGION:-us-east-1} --no-cli-pager"
 DIR="$(cd "$(dirname "$0")" && pwd)"; mkdir -p "$EV"
-[ "$($A sts get-caller-identity --query Account --output text)" = "111122223333" ] || { echo "STOP: wrong account"; exit 1; }
-for f in summary.json uefi-data.blob; do $A s3 cp --only-show-errors "s3://smh-poc-artifacts-111122223333/build/out-$VERSION/$f" "$EV/$f"; done
+[ "$($A sts get-caller-identity --query Account --output text)" = "${SMH_ACCOUNT:-111122223333}" ] || { echo "STOP: wrong account"; exit 1; }
+for f in summary.json uefi-data.blob; do $A s3 cp --only-show-errors "s3://smh-poc-artifacts-${SMH_ACCOUNT:-111122223333}/build/out-$VERSION/$f" "$EV/$f"; done
 eval "$(python3 -c "
 import json,sys; s=json.load(open(sys.argv[1]))
 print(f\"export PCR4={s['PCR4']} PCR7={s['PCR7']} PCR12={s['PCR12']} PCR15={s['PCR15_open']}\")" "$EV/summary.json")"

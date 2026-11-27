@@ -4,7 +4,7 @@
 #   m1/canary.enc   a test sentence encrypted with that data key
 # The plain data key exists only in this process's memory and is never written.
 set -euo pipefail
-PROFILE="poc-ino"; ACCOUNT="111122223333"; REGION="us-east-1"
+PROFILE="${SMH_PROFILE:-poc-ino}"; ACCOUNT="${SMH_ACCOUNT:-111122223333}"; REGION="${SMH_REGION:-us-east-1}"
 A="aws --profile $PROFILE --region $REGION --no-cli-pager"
 [ "$($A sts get-caller-identity --query Account --output text)" = "$ACCOUNT" ] || { echo "STOP: wrong account"; exit 1; }
 BUCKET="smh-poc-artifacts-$ACCOUNT"; TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT

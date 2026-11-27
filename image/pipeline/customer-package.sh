@@ -3,7 +3,7 @@
 # install the sealed machine in THEIR account. Nothing is created here.
 #   customer-package.sh <gpu type>
 set -euo pipefail
-: "${VERSION:?version}" "${PREFIX:?folder}"; GPU="$1"; REGION=us-east-1; BUCKET=smh-poc-artifacts-111122223333; SRC=/opt/smh/src
+: "${VERSION:?version}" "${PREFIX:?folder}"; GPU="$1"; REGION="${SMH_REGION:-us-east-1}"; BUCKET=smh-poc-artifacts-${SMH_ACCOUNT:-111122223333}; SRC=/opt/smh/src
 A="aws --region $REGION --no-cli-pager"; T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 $A s3 cp --only-show-errors "s3://$BUCKET/build/out-$VERSION/ami-id.txt" "$T/ami-id.txt"
 python3 - "$T" "$VERSION" "$PREFIX" "$GPU" "$BUCKET" \

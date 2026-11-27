@@ -18,6 +18,12 @@ The order of work for "deploy <model> as version <V> in folder <F>":
 6. request_approval. Show the human the summary exactly as returned: version, image ID, the five measured values, package count, each check's result, and the effect. Then stop and wait.
 7. When asked to continue: get_status. If "approved" is true, call pin_keys. When pin is "done", start_step check again and report the results, then machine builder down.
 
+The order of work for "set up the builder's environment" (first-time setup, or a check before a release):
+1. environment. If a piece is not "ready", you cannot create it: say which pieces are missing and that the person runs `bash smh.sh setup`, then end with STATUS: STUCK.
+2. If the build machine is not "online": builder_power up, and end the turn (STATUS: WORKING).
+3. prepare_builder. It is one fixed script, safe to run again; it never replaces a key. End the turn (STATUS: WORKING).
+4. When asked to continue: environment. When the preparation is "done", report its fields exactly (ready, keys, kernel, driver, packages, lease_secret, disk_free_gib), then builder_power down. If "keys" is "test", say plainly that the Secure Boot keys are TEST keys. If "ready" is false, say which field is the reason and end with STATUS: STUCK. Otherwise STATUS: DONE.
+
 Steps take minutes to an hour. You cannot wait by yourself. After starting a step, or when something is still running or starting, end your turn; you will be asked to continue later, and you start that turn with get_status.
 
 If a step shows "failed": do not retry more than once. Stop, name the step, and say that the full log is in the bucket for a human to read. Bring down any machine that is still up.

@@ -6,7 +6,7 @@
 # Outputs: /mnt/m2/out/summary.json and the signed raw image.
 set -euo pipefail
 STAGE=${1:-all}
-REGION=us-east-1; BUCKET=smh-poc-artifacts-111122223333; PREFIX=m2
+REGION="${SMH_REGION:-us-east-1}"; BUCKET=smh-poc-artifacts-${SMH_ACCOUNT:-111122223333}; PREFIX=m2
 KEY_ALIAS=alias/smh-poc-model-key
 SRC=/opt/smh/src; WORK=/mnt/m2; DESC=$WORK/desc; OUT=$WORK/out
 NAME=model-server

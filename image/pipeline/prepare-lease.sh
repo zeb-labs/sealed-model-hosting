@@ -7,7 +7,7 @@
 #    root only. It is the seal key for usage records (sealbox/meter.py).
 # The plain secret is never printed and never leaves this disk.
 set -euo pipefail
-REGION=us-east-1; BUCKET=smh-poc-artifacts-111122223333
+REGION="${SMH_REGION:-us-east-1}"; BUCKET=smh-poc-artifacts-${SMH_ACCOUNT:-111122223333}
 install -d -m 0700 /opt/smh/lease; umask 077
 aws kms generate-data-key --region $REGION --key-id alias/smh-poc-lease-key --key-spec AES_256 --output json | python3 -c '
 import sys, json, base64

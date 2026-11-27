@@ -5,7 +5,7 @@
 #   /mnt/m6/b3.raw   the signed image with one changed byte in block 0 of the system partition
 #   s3://.../m6/model.tensors.tampered.sbox   the encrypted weights (from folder PREFIX, default m9) with one changed byte
 set -euo pipefail
-REGION=us-east-1; BUCKET=smh-poc-artifacts-111122223333
+REGION="${SMH_REGION:-us-east-1}"; BUCKET=smh-poc-artifacts-${SMH_ACCOUNT:-111122223333}
 RAW=$(ls /mnt/m5/signed/*.raw); mkdir -p /mnt/m6; cd /mnt/m6
 part() { lsblk -ln -o PATH,FSTYPE "$1" | awk -v t="$2" '$2==t{print $1}' | head -1; }
 
