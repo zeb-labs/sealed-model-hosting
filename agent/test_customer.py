@@ -54,7 +54,7 @@ def test_the_agent_chooses_only_a_name_of_our_shape_and_a_machine_type_from_the_
 def test_install_takes_every_value_from_the_builders_package_and_the_persons_request():
     a = Fake()
     assert "no install request" in c.call(a, "install", {"name": "smh-poc-oc", "machine_type": "g5.xlarge"})["refused"]
-    a.request(Cidr="10.211.0.64/26", ExistingVpcId="vpc-08afff902599b513d")
+    a.request(Cidr="10.211.0.64/26", ExistingVpcId="vpc-1234567890abcdef0")
     assert c.call(a, "install", {"name": "smh-poc-oc", "machine_type": "g6.xlarge"})["stack"] == "creating"
     name, template, p = a.created[0]
     assert (name, template, p["Ami"], p["ModelKeyArn"], p["InstanceType"], p["Cidr"]) == ("smh-poc-oc", "customer.yaml", "ami-1", "arn:k1", "g6.xlarge", "10.211.0.64/26")
