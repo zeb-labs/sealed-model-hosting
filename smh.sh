@@ -12,6 +12,7 @@
 #   bash smh.sh builder | customer | more     open one of those menus directly
 #   DRY=1 bash smh.sh           show-only mode: prints what each entry would run
 #   bash smh.sh <command>       any single action, straight from the command line (list below)
+#   bash smh.sh ui              the same actions as buttons on a web page, on this machine only (http://127.0.0.1:8765)
 #
 # The builder:
 #   setup                                FIRST TIME: creates every fixed piece of the builder's side that is missing, sets up
@@ -535,6 +536,7 @@ remove)
     fi
     echo "deleted $s"
   done ;;
+ui)   exec python3 ui/server.py ;;      # the control page: the same actions as buttons, on this machine only
 help|-h|--help) sed -n 2,40p "$0" ;;
 *) sed -n 2,40p "$0"; exit 2 ;;
 esac

@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sealed model hosting - control page</title>
+<meta name="description" content="Run the builder's and the customer's side of sealed model hosting from one page.">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Manrope:wght@500;600&display=swap">
+<style>
+/* zeb two-tone, dark only: charcoal ground, beige text, lime as the single accent. Flat fills, no gradients. */
+:root{
+  --lime:#CEF79F; --lime-deep:#9FD16A; --charcoal:#222F30; --beige:#E7E8E1;
+  --text:#E7E8E1; --muted:rgba(231,232,225,.66); --surface:#2A383A; --border:rgba(231,232,225,.16); --warn:#F2C879;
+  --display:Manrope, Arial, sans-serif; --sans:Inter, system-ui, -apple-system, sans-serif; --mono:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--charcoal);color:var(--text);font-family:var(--sans);font-size:15.5px;line-height:1.55;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1240px;margin:0 auto;padding:0 clamp(16px,4vw,48px)}
+h1,h2,h3{font-family:var(--display);font-weight:500;letter-spacing:-.02em;margin:0;line-height:1.15}
+h1{font-size:clamp(24px,3vw,34px)} h2{font-size:20px} h3{font-size:16.5px;letter-spacing:-.01em}
+p{margin:0}
+.overline{font-size:11px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:var(--lime)}
+header{display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding:26px 0 8px}
+header svg{height:24px;width:auto;display:block}
+header .title{margin-right:auto;display:grid;gap:2px}
+.muted{color:var(--muted)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin:22px 0 30px}
+.tile{border-top:2px solid var(--lime-deep);padding-top:10px;display:grid;gap:2px;min-width:0}
+.tile span{font-size:11px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+.tile b{font-family:var(--display);font-weight:500;font-size:17px;overflow-wrap:anywhere}
+main{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:28px;align-items:start;padding-bottom:56px}
+@media (max-width:900px){main{grid-template-columns:minmax(0,1fr)}}
+.tabs{display:inline-flex;border:1px solid var(--border);border-radius:100px;padding:4px;gap:4px;margin:12px 0 16px}
+.tabs button{font:inherit;font-weight:600;font-size:14px;border:0;background:transparent;color:var(--text);border-radius:100px;padding:8px 18px;min-height:40px;cursor:pointer}
+.tabs button[aria-selected="true"]{background:var(--beige);color:var(--charcoal)}
+.list{display:grid;gap:10px}
+.act{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:16px 18px;display:grid;gap:10px}
+.act .row{display:flex;gap:14px;align-items:flex-start}
+.act .txt{display:grid;gap:4px;margin-right:auto;min-width:0}
+.act p{font-size:14px;color:var(--muted)}
+.meta{display:flex;gap:8px;flex-wrap:wrap}
+.pill{font-size:12px;font-weight:600;border:1px solid var(--border);border-radius:100px;padding:2px 10px;color:var(--text);white-space:nowrap}
+.pill.cost{border-color:var(--warn);color:var(--warn)}
+.btn{font:inherit;font-weight:600;font-size:14px;border-radius:100px;padding:9px 20px;min-height:44px;cursor:pointer;border:1px solid var(--border);background:transparent;color:var(--text);white-space:nowrap;transition:border-color 150ms ease,color 150ms ease,background 150ms ease}
+.btn:hover:not(:disabled){border-color:var(--lime);color:var(--lime)}
+.btn.primary{background:var(--lime);border-color:var(--lime);color:var(--charcoal)}
+.btn.primary:hover:not(:disabled){background:var(--lime-deep);border-color:var(--lime-deep);color:var(--charcoal)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+:focus-visible{outline:3px solid var(--lime-deep);outline-offset:2px}
+label{display:grid;gap:4px;font-size:12.5px;color:var(--muted);flex:1;min-width:180px}
+input{font:inherit;font-size:14px;background:var(--charcoal);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:9px 12px;min-height:44px;width:100%}
+.fields{display:flex;gap:10px;flex-wrap:wrap}
+.confirm{display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--border);padding-top:12px}
+.confirm span{font-size:14px;margin-right:auto}
+.run{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:clamp(18px,2.4vw,28px);display:grid;gap:16px;position:sticky;top:18px;min-width:0}
+.runhead{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.runhead h2{margin-right:auto}
+.state{font-size:12.5px;font-weight:600;border-radius:100px;padding:4px 12px;border:1px solid var(--border)}
+.state.running{background:var(--lime);border-color:var(--lime);color:var(--charcoal)}
+.state.failed{border-color:var(--warn);color:var(--warn)}
+.bar{height:6px;border-radius:100px;background:var(--charcoal);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--lime-deep);width:0;transition:width 600ms cubic-bezier(.22,1,.36,1)}
+.now{font-size:16px}
+.steps{list-style:none;margin:0;padding:0;display:grid;gap:6px;font-size:14px;max-height:300px;overflow:auto}
+.steps li{padding-left:14px;border-left:2px solid var(--border);color:var(--text);overflow-wrap:anywhere}
+.steps li:last-child{border-left-color:var(--lime-deep)}
+.advice{border:1px solid var(--warn);border-radius:14px;padding:14px 16px;display:grid;gap:8px}
+.advice h3{color:var(--warn)}
+.advice ol{margin:0;padding-left:20px;display:grid;gap:6px;font-size:14.5px}
+details summary{cursor:pointer;font-size:13.5px;color:var(--muted);min-height:32px}
+pre{margin:8px 0 0;background:var(--charcoal);border:1px solid var(--border);border-radius:12px;padding:12px;font:12px/1.5 var(--mono);max-height:320px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}
+.err{color:var(--warn);font-size:14px}
+footer{border-top:1px solid var(--border);padding:18px 0 28px;font-size:13px;color:var(--muted)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <svg role="img" aria-label="zeb" xmlns="http://www.w3.org/2000/svg" xmlns:v="https://vecta.io/nano" viewBox="0 0 119 31" width="119" height="31" fill="none" preserveAspectRatio="xMidYMid meet"><path d="M50.65 29.755v-3.17l13.174-15.96.919 1.722H50.888v-4.01h17.859v3.17l-13.173 15.96-.998-1.722h14.53v4.01H50.65zm31.787.286c-2.373 0-4.448-.475-6.225-1.424s-3.152-2.251-4.126-3.913c-.974-1.655-1.46-3.541-1.46-5.653s.475-4.028 1.424-5.677c.949-1.643 2.258-2.933 3.925-3.87s3.572-1.406 5.707-1.406 3.937.456 5.568 1.363a9.83 9.83 0 0 1 3.846 3.852c.931 1.655 1.4 3.608 1.4 5.854l-.018.724-.061.761H74.6v-3.328h15.176l-1.959 1.041c.024-1.229-.225-2.312-.761-3.249a5.87 5.87 0 0 0-2.184-2.209c-.919-.535-1.984-.803-3.182-.803s-2.3.268-3.225.803c-.919.536-1.643 1.278-2.16 2.227-.523.949-.779 2.063-.779 3.347v.803c0 1.284.292 2.422.882 3.408.584.992 1.412 1.752 2.483 2.288 1.065.535 2.294.803 3.681.803 1.199 0 2.282-.189 3.243-.56s1.813-.961 2.562-1.765l2.683 3.091c-.961 1.126-2.166 1.984-3.62 2.586s-3.115.901-4.983.901l-.018.006zm13.855-.286V0h5.002v13.314l-.402 5.695.159 5.695v5.05h-4.765.006zm11.853.28c-1.813 0-3.431-.402-4.843-1.205-1.418-.803-2.531-2.014-3.341-3.626-.815-1.619-1.223-3.669-1.223-6.158s.42-4.57 1.26-6.176 1.977-2.799 3.401-3.59c1.43-.791 3.012-1.18 4.746-1.18 2.106 0 3.968.456 5.586 1.363s2.897 2.178 3.846 3.809 1.424 3.554 1.424 5.774-.475 4.144-1.424 5.775-2.227 2.909-3.846 3.827c-1.612.925-3.474 1.381-5.586 1.381v.006zm-.559-4.29c1.198 0 2.275-.268 3.225-.803s1.703-1.308 2.263-2.324.84-2.209.84-3.572-.28-2.586-.84-3.59-1.314-1.771-2.263-2.306-2.021-.803-3.225-.803-2.282.268-3.244.803-1.722 1.302-2.281 2.306-.84 2.197-.84 3.59.28 2.556.84 3.572 1.32 1.789 2.281 2.324 2.045.803 3.244.803z" fill="#fff"></path><path d="M16.91 0h.03a2.84 2.84 0 0 1 2.495 1.619l3.572 6.194 3.578-6.206.012-.024c.006-.012.006-.024.012-.024.006-.018.012-.024.018-.037s.006-.018.012-.024c.006-.018.012-.024.018-.03.006-.012.006-.018.012-.024.006-.012.012-.024.018-.03 0 0 .006-.012.012-.018.006-.012.006-.018.012-.024.006-.018.012-.024.018-.03.006-.012.006-.018.012-.024.006-.018.012-.024.018-.03.012-.012.012-.018.018-.024.006-.012.012-.024.018-.03 0 0 .006-.012.012-.018.006-.012.006-.018.012-.024.006-.018.018-.024.018-.03.012-.012.012-.018.018-.024.012-.012.024-.024.024-.03.012-.012.012-.018.018-.024l.024-.024c0-.006.012-.012.018-.018.006-.012.012-.018.018-.024.006-.018.018-.024.024-.03.006-.012.012-.018.018-.024.006-.018.018-.024.024-.03.006-.012.012-.018.018-.024l.024-.024.018-.018.024-.024.018-.018.018-.018.024-.024.018-.018c.012-.006.024-.012.03-.024l.018-.018c.012-.006.024-.012.03-.018.006 0 .018-.006.018-.012.012-.006.024-.012.03-.018.006 0 .018-.006.018-.012.018-.006.024-.012.037-.024 0 0 .012-.006.018-.012.024-.012.037-.024.055-.037.024-.012.043-.024.055-.037l.055-.037s.012-.006.018-.012c.012-.006.024-.012.037-.024.006 0 .012-.006.018-.012l.037-.018c.006 0 .012-.006.018-.012.018-.012.037-.018.061-.03.018-.012.037-.018.061-.03.018-.012.043-.018.061-.03s.043-.018.061-.03c.018-.006.043-.018.061-.024a2.46 2.46 0 0 1 .225-.079l.067-.018.067-.018a2.75 2.75 0 0 1 .456-.073h.073.037.037.037.037H16.77h.037L16.91 0z" fill="#717d7a"></path><path d="M33.722 26.846a2.87 2.87 0 0 0-.432-1.193L19.441 1.619A2.85 2.85 0 0 0 16.952 0h-.037-.037-.158c-1.059.061-1.959.7-2.397 1.606L.456 25.647a2.84 2.84 0 0 0-.444 1.272v.03L0 27.199v.024c.006.888.42 1.679 1.065 2.197.408.329.913.554 1.485.608h.024l.237.012h.024 28.057.024c.073 0 .146 0 .219-.012a2.84 2.84 0 0 0 1.546-.627 2.86 2.86 0 0 0 1.047-2.111l-.018-.45.012.006z" fill="#3b4240"></path><path d="M45.995 26.846a2.87 2.87 0 0 0-.432-1.193L31.708 1.619C31.27.7 30.357.055 29.292 0h-.03-.012-.03-.043-.037-.049-.037-.037-.037-.073c-.158.012-.31.037-.456.073-.024 0-.049.012-.067.018l-.067.018-.225.079c-.024.006-.043.018-.061.024s-.043.018-.061.03-.043.018-.061.03-.043.018-.061.03-.037.018-.061.03c-.006 0-.012.006-.018.012 0 0-.024.018-.037.024-.006 0-.012.006-.018.012-.012.006-.024.012-.037.024 0 0-.012.006-.018.012l-.055.037c-.018.012-.037.024-.049.037-.024.012-.037.024-.055.037-.006 0-.018.006-.024.012-.012.006-.018.012-.03.024-.006 0-.018.006-.018.012-.012.006-.024.012-.03.018-.006 0-.018.006-.018.012-.012.006-.024.012-.03.018-.006 0-.018.006-.018.012-.012.012-.024.018-.03.03-.006 0-.012.006-.018.012l-.03.03-.018.012s-.006.018-.012.018l-.024.024h-.006s-.006.018-.012.018l-.024.024-.018.018c-.006.018-.018.024-.024.03-.006.012-.012.018-.018.024-.006.018-.018.024-.024.03-.006.012-.012.018-.018.024-.006.018-.018.024-.024.03l-.024.024c-.006.012-.012.018-.018.024 0 0-.012.012-.012.018l-.012.012c-.006.012-.012.018-.018.024 0 .006-.012.012-.012.018-.006.012-.006.018-.012.024-.006.012-.012.024-.018.03 0 0-.006.012-.012.018-.006.012-.006.018-.012.024-.012.018-.018.024-.024.03-.006.012-.006.018-.012.024-.006.018-.012.024-.018.03-.006.012-.006.018-.012.024v.012l-.018.018s-.006.012-.012.018l-.006.024c-.012.018-.018.024-.024.03-.006.012-.006.018-.012.024-.006.018-.012.024-.018.037s-.006.024-.012.024c-.006.018-.012.024-.018.037L23.11 7.728l10.283 17.841a2.87 2.87 0 0 1 .432 1.193 2.78 2.78 0 0 1 .018.45c-.03.852-.426 1.606-1.047 2.111-.42.347-.943.572-1.533.627l-.231.012h-.012 12.255.024c.073 0 .146 0 .219-.012a2.84 2.84 0 0 0 1.545-.627 2.86 2.86 0 0 0 1.047-2.111l-.018-.45-.097.085z" fill="#d1ff79"></path><path d="M30.929 30.041c.073 0 .146 0 .219-.012a2.84 2.84 0 0 0 1.546-.627 2.86 2.86 0 0 0 1.047-2.111l-.018-.45a2.87 2.87 0 0 0-.432-1.193L23.007 7.807 12.723 25.641a2.84 2.84 0 0 0-.444 1.272v.03l-.012.249v.024c.006.888.42 1.679 1.065 2.197.408.329.913.554 1.485.609h.024l.237.012h.024 15.784.024l.018.006z" fill="#3d473c"></path></svg>
+    <div class="title"><p class="overline">Sealed model hosting</p><h1>Control page</h1></div>
+    <button class="btn" id="refresh" type="button">Refresh status</button>
+  </header>
+  <div class="tiles" id="tiles" aria-live="polite"></div>
+
+  <main>
+    <section aria-labelledby="h-actions">
+      <h2 id="h-actions">What do you want to do?</h2>
+      <div class="tabs" role="tablist" aria-label="Who you are">
+        <button role="tab" data-side="builder" aria-selected="true" type="button">Model builder</button>
+        <button role="tab" data-side="customer" aria-selected="false" type="button">Customer</button>
+        <button role="tab" data-side="house" aria-selected="false" type="button">House</button>
+      </div>
+      <div class="list" id="list"></div>
+      <p class="err" id="err" role="alert"></p>
+    </section>
+
+    <section class="run" aria-labelledby="h-run" aria-live="polite">
+      <div class="runhead"><h2 id="h-run">Nothing is running</h2><span class="state" id="state">idle</span></div>
+      <div class="bar" aria-hidden="true"><i id="bar"></i></div>
+      <p class="now muted" id="now">Pick an action on the left. An AI agent on AWS AgentCore does the work; this page shows what it is doing.</p>
+      <div class="advice" id="advice" hidden><h3>The remediation agent looked into a failure</h3><p id="advice-what"></p><ol id="advice-steps"></ol></div>
+      <ol class="steps" id="steps"></ol>
+      <details><summary>Full output</summary><pre id="log"></pre></details>
+    </section>
+  </main>
+</div>
+<footer><div class="wrap">&copy; 2026 zeb. This page runs on your own machine and uses your AWS login. Each button runs one fixed command.</div></footer>
+
+<script>
+const TOKEN = "__TOKEN__", ACTIONS = __ACTIONS__;
+const $ = id => document.getElementById(id);
+const FIELDS = {model: ["Model: owner/name on Hugging Face, a folder, or s3://", "Qwen/Qwen2.5-1.5B-Instruct"], data: ["Data file (full path, .jsonl)", ""], steps: ["Training steps", "150"]};
+let side = "builder", asking = null, since = 0, lines = [], lastId = null, running = false;
+
+function el(tag, attrs, ...kids) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) { if (k === "text") n.textContent = v; else if (k in n) n[k] = v; else n.setAttribute(k, v); }
+  kids.forEach(k => n.append(k));
+  return n;
+}
+function api(path, body) {
+  return fetch(path, {method: body ? "POST" : "GET", headers: {"X-SMH-Token": TOKEN, "Content-Type": "application/json"}, body: body ? JSON.stringify(body) : undefined}).then(r => r.json());
+}
+
+function drawList() {
+  const list = $("list"); list.replaceChildren();
+  for (const [key, a] of Object.entries(ACTIONS)) {
+    if (a.side !== side || key === "status") continue;
+    const card = el("div", {className: "act"});
+    const meta = el("div", {className: "meta"}, el("span", {className: "pill", text: "about " + a.minutes + " min"}));
+    if (a.costs) meta.append(el("span", {className: "pill cost", text: "starts paid machines"}));
+    const go = el("button", {className: "btn", type: "button", text: "Run", disabled: running});
+    card.append(el("div", {className: "row"}, el("div", {className: "txt"}, el("h3", {text: a.label}), el("p", {text: a.what}), meta), go));
+    const inputs = {};
+    if (a.inputs.length) {
+      const fields = el("div", {className: "fields"});
+      a.inputs.forEach(f => { inputs[f] = el("input", {type: "text", value: FIELDS[f][1], autocomplete: "off", spellcheck: false}); fields.append(el("label", {text: FIELDS[f][0]}, inputs[f])); });
+      card.append(fields);
+    }
+    const start = () => run(key, Object.fromEntries(Object.entries(inputs).map(([k, i]) => [k, i.value])));
+    go.onclick = () => { if (a.confirm) { asking = key; drawList(); } else start(); };
+    if (asking === key) {
+      const yes = el("button", {className: "btn primary", type: "button", text: "Yes, start it", disabled: running});
+      const no = el("button", {className: "btn", type: "button", text: "Cancel"});
+      yes.onclick = () => { asking = null; start(); }; no.onclick = () => { asking = null; drawList(); };
+      card.append(el("div", {className: "confirm"}, el("span", {text: a.costs ? "This starts machines that cost money. Go ahead?" : "Are you sure?"}), no, yes));
+      go.disabled = true;
+    }
+    list.append(card);
+  }
+}
+
+function run(action, inputs) {
+  $("err").textContent = "";
+  api("/api/run", {action, inputs}).then(r => { if (r.error) $("err").textContent = r.error; else { since = 0; lines = []; poll(); } });
+}
+
+function drawTiles(status) {
+  const names = {"current release": "Current release", "keys": "Keys", "running now": "Running now", "one-click stack": "Customer's side", "spend estimate": "Spend"};
+  const tiles = $("tiles"); tiles.replaceChildren();
+  for (const [k, label] of Object.entries(names)) tiles.append(el("div", {className: "tile"}, el("span", {text: label}), el("b", {text: status[k] || "press Refresh status"})));
+}
+
+function drawRun(job) {
+  const wasRunning = running; running = job.state === "running";
+  if (job.state === "idle") return;
+  if (job.id !== lastId) { lastId = job.id; lines = []; }
+  lines.push(...job.lines); since = job.next;
+  $("h-run").textContent = job.label;
+  const mins = Math.floor(job.seconds / 60), secs = String(job.seconds % 60).padStart(2, "0");
+  $("state").textContent = {running: "running, " + mins + ":" + secs, done: "done in " + mins + ":" + secs, failed: "stopped, needs attention"}[job.state];
+  $("state").className = "state " + job.state;
+  $("bar").style.width = (job.state === "running" ? Math.min(96, job.seconds / (job.minutes * 60) * 100) : 100) + "%";
+  // A plain view: drop the per-minute ticker lines except the newest, and pull out the remediation agent's block.
+  const ticker = /\| nothing to type$|^STATUS: |^\s*$/, plain = [], advice = {what: "", steps: []};
+  let inBox = false, last = "";
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (/-{6,} WATCHER -{6,}/.test(line)) { inBox = true; advice.what = ""; advice.steps = []; continue; }
+    if (inBox) {
+      if (/^-{20,}$/.test(line)) { inBox = false; continue; }
+      const m = line.match(/^(\d+)\.\s+(.*)$/);
+      if (m) advice.steps.push(m[2]); else if (/^What went wrong/.test(line)) advice.what = line; else if (/^Fixing it myself/.test(line)) advice.what += " " + line;
+      continue;
+    }
+    if (ticker.test(line)) { if (/nothing to type/.test(line)) last = line.replace(/\s*\|\s*nothing to type$/, ""); continue; }
+    if (/^ACTION /.test(line)) continue;
+    plain.push(line); last = line;
+  }
+  $("now").textContent = last || "Starting"; $("now").className = "now" + (job.state === "running" ? "" : " muted");
+  $("steps").replaceChildren(...plain.slice(-40).map(t => el("li", {text: t})));
+  $("steps").scrollTop = $("steps").scrollHeight;
+  $("advice").hidden = !advice.what;
+  $("advice-what").textContent = advice.what;
+  $("advice-steps").replaceChildren(...advice.steps.map(t => el("li", {text: t})));
+  $("log").textContent = lines.join("\n");
+  if (wasRunning !== running) drawList();
+}
+
+function poll() {
+  api("/api/job?since=" + since).then(job => { drawTiles(job.status || {}); drawRun(job); }).catch(() => {}).finally(() => { clearTimeout(poll.t); poll.t = setTimeout(poll, running ? 2000 : 6000); });
+}
+
+document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
+  side = b.dataset.side; asking = null;
+  document.querySelectorAll(".tabs button").forEach(x => x.setAttribute("aria-selected", x === b));
+  drawList();
+});
+$("refresh").onclick = () => run("status", {});
+drawList(); drawTiles({}); poll();
+</script>
+</body>
+</html>

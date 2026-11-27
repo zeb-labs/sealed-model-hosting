@@ -94,6 +94,55 @@ Nothing is created for it. Without the setting, the watcher still explains
 failures, using plain built-in rules instead of the AI model. To switch the
 watcher off for one run: `SMH_NO_WATCHER=1 bash smh.sh up`.
 
+## The control page: the same actions as buttons
+
+You do not need the terminal after the first line:
+
+```bash
+bash smh.sh ui          # then open http://127.0.0.1:8765 in your browser
+```
+
+The page has three tabs (model builder, customer, house). Each button runs one
+fixed command of `smh.sh`; an agent on AgentCore does the work. On the right
+you see what the agent is doing, how long it has run, and, if a step fails,
+the remediation agent's finding and the exact steps for you. Actions that
+start paid machines are marked and ask once before they start.
+
+| On the page | The command behind it |
+| --- | --- |
+| Set up the builder's side | `bash smh.sh setup` |
+| Ship a model | `APPROVE=yes bash smh.sh ship <model>`: approved by itself only when all six checks pass |
+| Give or take the customer's access | `onboard`, `offboard` |
+| Bring up the customer's side, test, fine-tune, restart, remove | `up`, `test`, `finetune`, `restart`, `remove` |
+| Refresh status, switch everything off, stop or allow every customer | `status`, `off`, `cutoff`, `restore` |
+
+What keeps it safe:
+
+- It listens on your own machine only, and uses the AWS login the laptop already has. It adds no new rights.
+- A random token is made at each start; another web site open in your browser cannot press the buttons.
+- No input reaches a shell. A model name, a folder and a data file are each checked against a pattern.
+- One job at a time.
+
+It needs Python 3 and nothing else. Check it: `python3 ui/server.py --test`.
+
+### Hosting it for a team (later; not run)
+
+The same two files (`ui/server.py`, `ui/index.html`) can run on a small AWS
+machine instead of a laptop. This was NOT run. The page can start GPU
+machines, so it must never be reachable without a login.
+
+1. **Where.** A small EC2 instance (for example `t3.small`) in a private subnet, with this repository checked out, the AWS command line, and an instance role that has what your own user has today for `smh.sh`. A container on EKS or ECS works the same way; one copy only, because the running job is kept in memory.
+2. **A login in front.** An Application Load Balancer with HTTPS and its built-in sign-in (Amazon Cognito or your company's single sign-on) in front of the instance. Allow only the load balancer to reach port 8765.
+3. **Start it** with the three settings that say you have done step 2:
+
+   ```bash
+   SMH_UI_HOST=0.0.0.0 SMH_UI_NAMES=smh.example.com SMH_UI_BEHIND_LOGIN=yes python3 ui/server.py
+   ```
+
+   Without `SMH_UI_BEHIND_LOGIN=yes` the server refuses any address but the machine itself.
+4. **Simplest alternative, no load balancer:** keep it listening on the instance only and reach it through a Session Manager port forward: `aws ssm start-session --target <instance> --document-name AWS-StartPortForwardingSession --parameters portNumber=8765,localPortNumber=8765`. Each person then opens `http://127.0.0.1:8765` and AWS has already checked who they are.
+5. **Before real use:** who pressed what is not recorded by the page (the agents' own records are); add that, and keep the approval of a release with a person, not with the page.
+
 ## 1. What you need before you start
 
 | Need | Detail |

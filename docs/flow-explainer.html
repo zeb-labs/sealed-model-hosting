@@ -140,7 +140,7 @@ footer{padding-block:26px 34px;font-size:13px;color:var(--d-muted);border-top:1p
     <p class="overline">Secure model hosting - proof of concept</p>
     <h1>A model the customer can run but never read</h1>
     <p class="lede">A model builder ships its model into a customer's own AWS account. The customer's data never leaves that account, and the customer still cannot read or copy the model's weights. This page shows how that works, first in one picture, then step by step.</p>
-    <div class="chips"><span class="chip">Built on AWS NitroTPM attestation and KMS</span><span class="chip">Unmodified vLLM on one GPU</span><span class="chip">Tested on release 0.10.0</span></div>
+    <div class="chips"><span class="chip">Built on AWS NitroTPM attestation and KMS</span><span class="chip">Unmodified vLLM on one GPU</span><span class="chip">Run by three agents on AWS AgentCore</span><span class="chip">Attack suite on release 0.10.0</span></div>
   </div>
 </div>
 
@@ -240,7 +240,7 @@ footer{padding-block:26px 34px;font-size:13px;color:var(--d-muted);border-top:1p
       <div class="gcol"><h3>Keys and proof</h3><dl><dt>AWS KMS</dt><dd>Amazon's key service. It holds master keys that never leave it. You can only ask it to do something with a key, and it checks a written rule (the key policy) before it does.</dd><dt>Model key</dt><dd>A master key in KMS, in the builder's account. It is the only thing that can unwrap the model's data key. Its rule: release only to our exact machine image, and only once per boot.</dd><dt>Data key</dt><dd>The 256-bit key that actually encrypts the model. KMS creates it. It exists in readable form only for a moment: in the build pipeline while encrypting, and in the sealed machine's memory while loading.</dd><dt>Wrapped key</dt><dd>The data key, encrypted by the model key. A 184-byte file stored next to the model, in both buckets. Useless to anyone who cannot get KMS to unwrap it.</dd><dt>Lease and lease key</dt><dd>A lease is a short permit to keep serving. The lease key is a second master key in KMS used only for that: every minute the machine must get KMS to use it. If the builder disables the key, the permit runs out and the machine stops.</dd><dt>Attestation document</dt><dd>A proof of what a machine booted, signed by AWS hardware. It lists the machine's boot fingerprints. KMS reads it and compares it with the key's rule.</dd><dt>Measurement (PCR)</dt><dd>A fingerprint of something that ran during boot, recorded in the machine's TPM. A record can be added to but never rewritten. We use four: the boot file, the Secure Boot state, extra boot settings, and one of our own.</dd><dt>Open state, locked state</dt><dd>Two values of our own fingerprint. Open: the machine has checked its containers and may ask for the model key. Locked: it has asked once, and can never ask again on this boot. The lease key works only in the locked state.</dd></dl></div>
       <div class="gcol"><h3>The machine</h3><dl><dt>Sealed image</dt><dd>The disk image the machine boots from. It has no login of any kind, its disk is read-only and verified block by block, and it does one fixed job at boot.</dd><dt>Secure Boot</dt><dd>A firmware check that refuses to start a boot file that is not signed with the builder's key.</dd><dt>NitroTPM</dt><dd>A security component AWS gives each machine. It stores the boot fingerprints and produces the signed proof.</dd><dt>Loader</dt><dd>The first program of ours that runs. It checks the containers, proves the boot to KMS, receives the key once, and locks.</dd><dt>Decrypting proxy</dt><dd>A small program inside the machine. It fetches encrypted pieces of the model, checks and decrypts each one in memory, and hands them to the model server.</dd><dt>Encrypted local disk</dt><dd>A fast disk inside the machine used for the large container and for training. It is encrypted with a random key that exists only in memory, so its contents are unreadable after power-off.</dd><dt>Front gate</dt><dd>A small web server at the machine's only open port (HTTPS, port 443). It asks for an API key and lets the customer's app reach four addresses of the model server and nothing else.</dd><dt>API key</dt><dd>A password for the endpoint. The customer writes their keys in a file in their own bucket; the machine reads it every 30 seconds. No valid key, no answer.</dd><dt>Container firewall</dt><dd>Rules set at boot that stop the model server's container from opening any connection out. It can only fetch the weights from the proxy on the same machine.</dd><dt>Launch tags</dt><dd>Labels the customer's template puts on the machine. Three of them name the customer's bucket, key, and log group, so one image can serve many customers. They are not trusted and open nothing.</dd><dt>Private subnet, endpoint</dt><dd>The machine sits in a network with no route to the internet. It can reach exactly three AWS services through private doors called endpoints: storage, KMS, and logs.</dd></dl></div>
       <div class="gcol"><h3>The model</h3><dl><dt>Weights</dt><dd>The numbers that are the model. They are what the builder must protect.</dd><dt>vLLM</dt><dd>The open-source program that serves the model on the GPU. We run it unmodified.</dd><dt>Tensorizer format</dt><dd>A way of laying out the weights in a file so they can be read piece by piece straight into GPU memory.</dd><dt>Chunk</dt><dd>One 8 MiB piece of an encrypted file. Each chunk is encrypted separately and carries its own tamper check.</dd><dt>Tamper check</dt><dd>A 16-byte code on every chunk (AES-256-GCM). If a chunk is changed, swapped, dropped, or cut short, the check fails and the machine refuses it.</dd><dt>Fine-tuning, adapter</dt><dd>Fine-tuning teaches the model from the customer's examples. The result is a small add-on file called an adapter (LoRA). The base weights do not change.</dd></dl></div>
-      <div class="gcol"><h3>Running and control</h3><dl><dt>Deployer agent</dt><dd>An AI agent that runs the builder's release steps in order by calling fixed tools. It cannot approve a release, write a key rule, or read a secret.</dd><dt>Remediation agent</dt><dd>An AI agent called when a step fails, for the builder or the customer. It looks into the failure with read-only tools, applies a fix from a short fixed list, or tells the person exactly what to do. It cannot run commands.</dd><dt>Onboarding</dt><dd>The builder adds one statement to both key rules for one customer's machine role. The measurements are still required. Removing the statement cuts that customer off.</dd><dt>Approval</dt><dd>A record that a human approved one exact build. The keys cannot be tied to an image without it.</dd><dt>Job runner, trainer</dt><dd>The job runner picks up fine-tuning jobs from the customer's bucket and checks the form. The trainer does the training with no network and no credentials.</dd><dt>Usage meter, usage record</dt><dd>The meter counts requests and tokens. Every two minutes it writes a small record of those counts, with a seal, into the customer's bucket.</dd><dt>Seal</dt><dd>A keyed fingerprint (HMAC) on each usage record. The builder can tell if a record was changed; missing numbers in the sequence show if one was removed.</dd><dt>Log shipper</dt><dd>Sends the machine's own log to the customer's log store. It never sends what the trainer prints.</dd><dt>Cut-off</dt><dd>The builder disables the keys. The machine's next lease renewals fail, it stops serving, and it powers off.</dd></dl></div>
+      <div class="gcol"><h3>Running and control</h3><dl><dt>AgentCore harness, gateway</dt><dd>AWS AgentCore runs AI agents. A harness is the agent's loop: it thinks and calls tools. A gateway is the fixed list of tools one harness may call.</dd><dt>Release agent (deployer)</dt><dd>The builder's agent. It prepares the build machine and runs the release steps in order by calling fixed tools. It cannot approve a release, write a key rule, or read a secret.</dd><dt>Customer agent</dt><dd>The customer's agent. It creates the customer's one stack, waits for the model, makes an API key, and tests the endpoint. It never sees the key or the model.</dd><dt>Remediation agent</dt><dd>An AI agent called when a step fails, for the builder or the customer. It looks into the failure with read-only tools, applies a fix from a short fixed list, or tells the person exactly what to do. It cannot run commands.</dd><dt>Onboarding</dt><dd>The builder adds one statement to both key rules for one customer's machine role. The measurements are still required. Removing the statement cuts that customer off.</dd><dt>Approval</dt><dd>A record that a human approved one exact build. The keys cannot be tied to an image without it.</dd><dt>Job runner, trainer</dt><dd>The job runner picks up fine-tuning jobs from the customer's bucket and checks the form. The trainer does the training with no network and no credentials.</dd><dt>Usage meter, usage record</dt><dd>The meter counts requests and tokens. Every two minutes it writes a small record of those counts, with a seal, into the customer's bucket.</dd><dt>Seal</dt><dd>A keyed fingerprint (HMAC) on each usage record. The builder can tell if a record was changed; missing numbers in the sequence show if one was removed.</dd><dt>Log shipper</dt><dd>Sends the machine's own log to the customer's log store. It never sends what the trainer prints.</dd><dt>Cut-off</dt><dd>The builder disables the keys. The machine's next lease renewals fail, it stops serving, and it powers off.</dd></dl></div>
     </div>
   </div>
 </section>
@@ -291,6 +291,79 @@ footer{padding-block:26px 34px;font-size:13px;color:var(--d-muted);border-top:1p
   </div>
 </section>
 
+<section class="dark" id="agents">
+  <div class="wrap">
+    <div class="head">
+      <p class="overline">The whole flow on AWS AgentCore</p>
+      <h2>Three agents run it: one for the builder, one for the customer, one that looks into failures</h2>
+      <p class="lede">Each person runs one command. The command hands the work to an AI agent on AWS AgentCore. An agent here is a harness (the loop that thinks and calls tools) that may call only its own gateway (a fixed list of tools), which runs one function with a narrow AWS role. No agent can run a command of its own, read a key, or read the model.</p>
+    </div>
+    <figure style="margin:0">
+      <div class="scroll"><svg viewBox="0 0 960 400" role="img" aria-label="Three agents on AWS AgentCore. Each command goes to one harness, each harness calls only its own gateway, each gateway runs one function with a narrow role." style="max-width:100%;height:auto;min-width:720px"><text x="20" y="40" font-size="11" letter-spacing="1.6" fill="var(--lime)" font-weight="600">ONE COMMAND</text><text x="236" y="40" font-size="11" letter-spacing="1.6" fill="var(--lime)" font-weight="600">AGENT (HARNESS)</text><text x="478" y="40" font-size="11" letter-spacing="1.6" fill="var(--lime)" font-weight="600">FIXED TOOLS (GATEWAY)</text><text x="736" y="40" font-size="11" letter-spacing="1.6" fill="var(--lime)" font-weight="600">CAN CHANGE</text><rect x="20" y="66" width="180" height="66" rx="12" fill="var(--d-surface)" stroke="var(--d-border)" stroke-width="1.5"/><text x="110.0" y="94" text-anchor="middle" font-size="14" font-weight="600" fill="var(--d-text)">smh.sh setup, then ship</text><text x="110.0" y="114" text-anchor="middle" font-size="12" fill="var(--d-muted)">the builder</text><line x1="200" y1="99" x2="232" y2="99" stroke="var(--lime)" stroke-width="1.5" marker-end="url(#a1)"/><text x="218.0" y="91" text-anchor="middle" font-size="11.5" fill="var(--d-muted)"></text><rect x="236" y="66" width="200" height="66" rx="12" fill="var(--d-surface)" stroke="var(--lime)" stroke-width="1.5"/><text x="336.0" y="94" text-anchor="middle" font-size="14" font-weight="600" fill="var(--d-text)">Release agent</text><text x="336.0" y="114" text-anchor="middle" font-size="12" fill="var(--d-muted)">harness smh_poc_deployer</text><line x1="436" y1="99" x2="474" y2="99" stroke="var(--lime)" stroke-width="1.5" marker-end="url(#a1)"/><text x="457.0" y="91" text-anchor="middle" font-size="11.5" fill="var(--d-muted)">calls</text><rect x="478" y="66" width="214" height="66" rx="12" fill="var(--d-surface)" stroke="var(--d-border)" stroke-width="1.5"/><text x="585.0" y="94" text-anchor="middle" font-size="14" font-weight="600" fill="var(--d-text)">Gateway, 11 fixed tools</text><text x="585.0" y="114" text-anchor="middle" font-size="12" fill="var(--d-muted)">one function, narrow role</text><line x1="692" y1="99" x2="732" y2="99" stroke="var(--lime)" stroke-width="1.5" marker-end="url(#a1)"/><text x="714.0" y="91" text-anchor="middle" font-size="11.5" fill="var(--d-muted)">acts</text><rect x="736" y="66" width="206" height="66" rx="12" fill="var(--d-surface)" stroke="var(--d-border)" stroke-width="1.5"/><text x="839.0" y="94" text-anchor="middle" font-size="14" font-weight="600" fill="var(--d-text)">Build machine, GPU helper</text><text x="839.0" y="114" text-anchor="middle" font-size="12" fill="var(--d-muted)">fixed steps only; no key rules</text><rect x="20" y="186" width="180" height="66" rx="12" fill="var(--d-surface)" stroke="var(--d-border)" stroke-width="1.5"/><text x="110.0" y="214" text-anchor="middle" font-size="14" font-weight="600" fill="var(--d-text)">bash smh.sh up</text><text x="110.0" y="234" text-anchor="middle" font-size="12" fill="var(--d-muted)">the customer, one command</text><line x1="200" y1="219" x2="232" y2="219" stroke="var(--lime)" stroke-width="1.5" marker-end="url(#a1)"/><text x="218.0" y="211" text-anchor="middle" font-size="11.5" fill="var(--d-muted)"></text><rect x="236" y="186" width="200" height="66" rx="12" fill="var(--d-surface)" stroke="var(--lime)" stroke-width="1.5"/><text x="336.0" y="214" text-anchor="middle" font-size="14" font-weight="600" fill="var(--d-text)">Customer agent</text><text x="336.0" y="234" text-anchor="middle" font-size="12" fill="var(--d-muted)">harness smh_poc_customer</text><line x1="436" y1="219" x2="474" y2="219" stroke="var(--lime)" stroke-width="1.5" marker-end="url(#a1)"/><text x="457.0" y="211" text-anchor="middle" font-size="11.5" fill="var(--d-muted)">calls</text><rect x="478" y="186" width="214" height="66" rx="12" fill="var(--d-surface)" stroke="var(--d-border)" stroke-width="1.5"/><text x="585.0" y="214" text-anchor="middle" font-size="14" font-weight="600" fill="var(--d-text)">Gateway, 6 fixed tools</text><text x="585.0" y="234" text-anchor="middle" font-size="12" fill="var(--d-muted)">one function, narrow role</text><line x1="692" y1="219" x2="732" y2="219" stroke="var(--lime)" stroke-width="1.5" marker-end="url(#a1)"/><text x="714.0" y="211" text-anchor="middle" font-size="11.5" fill="var(--d-muted)">acts</text><rect x="736" y="186" width="206" height="66" rx="12" fill="var(--d-surface)" stroke="var(--d-border)" stroke-width="1.5"/><text x="839.0" y="214" text-anchor="middle" font-size="14" font-weight="600" fill="var(--d-text)">The customer's one stack</text><text x="839.0" y="234" text-anchor="middle" font-size="12" fill="var(--d-muted)">stack, API key, test</text><rect x="20" y="306" width="180" height="66" rx="12" fill="var(--d-surface)" stroke="var(--d-border)" stroke-width="1.5"/><text x="110.0" y="334" text-anchor="middle" font-size="14" font-weight="600" fill="var(--d-text)">any step that fails</text><text x="110.0" y="354" text-anchor="middle" font-size="12" fill="var(--d-muted)">builder or customer side</text><line x1="200" y1="339" x2="232" y2="339" stroke="var(--lime)" stroke-width="1.5" marker-end="url(#a1)"/><text x="218.0" y="331" text-anchor="middle" font-size="11.5" fill="var(--d-muted)"></text><rect x="236" y="306" width="200" height="66" rx="12" fill="var(--d-surface)" stroke="var(--lime)" stroke-width="1.5"/><text x="336.0" y="334" text-anchor="middle" font-size="14" font-weight="600" fill="var(--d-text)">Remediation agent</text><text x="336.0" y="354" text-anchor="middle" font-size="12" fill="var(--d-muted)">harness smh_poc_watcher</text><line x1="436" y1="339" x2="474" y2="339" stroke="var(--lime)" stroke-width="1.5" marker-end="url(#a1)"/><text x="457.0" y="331" text-anchor="middle" font-size="11.5" fill="var(--d-muted)">calls</text><rect x="478" y="306" width="214" height="66" rx="12" fill="var(--d-surface)" stroke="var(--d-border)" stroke-width="1.5"/><text x="585.0" y="334" text-anchor="middle" font-size="14" font-weight="600" fill="var(--d-text)">Gateway, 8 tools: read only</text><text x="585.0" y="354" text-anchor="middle" font-size="12" fill="var(--d-muted)">one function, read-only role</text><line x1="692" y1="339" x2="732" y2="339" stroke="var(--lime)" stroke-width="1.5" marker-end="url(#a1)"/><text x="714.0" y="331" text-anchor="middle" font-size="11.5" fill="var(--d-muted)">reads</text><rect x="736" y="306" width="206" height="66" rx="12" fill="var(--d-surface)" stroke="var(--d-border)" stroke-width="1.5"/><text x="839.0" y="334" text-anchor="middle" font-size="14" font-weight="600" fill="var(--d-text)">Nothing</text><text x="839.0" y="354" text-anchor="middle" font-size="12" fill="var(--d-muted)">it reads, decides, and records</text><path d="M336 306 L336 262" stroke="var(--d-text)" stroke-width="1.2" stroke-dasharray="4 4" fill="none" marker-end="url(#a2)"/><text x="346" y="290" font-size="11.5" fill="var(--d-muted)">looks into the failures of the two above</text></svg></div>
+      <figcaption style="font-size:14px;color:var(--d-muted);margin-top:10px">Each command goes to one harness. The two agents that act never see log text, and the one that reads logs can change nothing.</figcaption>
+    </figure>
+    <div class="cols" style="margin-top:26px">
+      <div class="card">
+        <h3>Builder, first time: <code>bash smh.sh setup</code></h3>
+        <ul>
+          <li>The command creates the fixed pieces that are missing: cost guard, network and bucket, the two keys, the build machine.</li>
+          <li>It sets up the three agents. All use one existing Claude inference profile from a settings file; nothing is created for the model.</li>
+          <li>The release agent checks every piece, starts the build machine and runs one fixed script on it: build tools, Secure Boot keys, a signed NVIDIA driver for the image's kernel, the lease secret. It never replaces a key.</li>
+          <li>It reads back fixed fields, says plainly if the keys are test keys, and stops the machine.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Builder, each release: <code>bash smh.sh ship</code></h3>
+        <ul>
+          <li>The release agent sizes the model and picks a GPU machine.</li>
+          <li>It runs the fixed steps in order: encrypt the model, build and sign the sealed image, register it, run the checks, write the customer's package.</li>
+          <li>It asks for approval. The keys are tied to the image only when a human's approval record names exactly that build; the agent cannot write that record.</li>
+          <li>Then the customer's machine role is given access. The measurements are still required.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Customer: <code>bash smh.sh up</code></h3>
+        <ul>
+          <li>The command writes a small request: which release, and this account's network settings.</li>
+          <li>The customer agent creates the one stack from the builder's package. It chooses only the stack's name and a GPU type from a list.</li>
+          <li>It waits for the sealed machine to prove itself and load the model, then makes an API key. The key is made inside the function and never shown to the agent.</li>
+          <li>It runs a stand-in app inside the network and reports fixed results: health, a call without a key, a real answer, open ports.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="cols" style="margin-top:22px">
+      <div class="card">
+        <h3>What keeps the agents safe</h3>
+        <ul>
+          <li>Every input is checked against a list or a pattern. No input carries a command, a policy, or a measured value.</li>
+          <li>Every answer is fixed fields. Log text and console text never come back to an agent that can act.</li>
+          <li>The broad rights needed to create a network or a machine sit in CloudFormation's own role, usable only for stacks of one name, from fixed templates.</li>
+          <li>Automation can change or remove only resources that carry the project's tags.</li>
+          <li>Every decision and tool call is recorded in the account it ran in.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Run on November 27, 2026</h3>
+        <ul>
+          <li>Setup: end to end in our account, where every piece already existed. The build machine script was also run on a brand-new machine: ready in 5 minutes, and it then built and signed a sealed image.</li>
+          <li>Release 0.12.0: made by the release agent in 52 minutes, with no failure.</li>
+          <li>Customer side: brought up and tested by the customer agent in 27 minutes. Health 200, no key 401, a real answer 200, only port 443 open.</li>
+          <li>Three real failures on the way (a document update, a missing right in a new role, a half-made stack left behind). The remediation agent explained each one.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Not shown, said plainly</h3>
+        <ul>
+          <li>An empty account in one go, and a second account. Builder and customer agents share our one account; in real life the customer agent lives in the customer's own.</li>
+          <li>The agent does not create the builder's networks, keys, and roles. The setup command does, with the person's own AWS user.</li>
+          <li>The builder's own Secure Boot keys can be supplied; only test keys were run.</li>
+          <li>Fine-tuning is still one command watched by the remediation agent, not driven by the customer agent.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section class="dark" id="changes">
   <div class="wrap">
     <div class="head">
@@ -328,7 +401,7 @@ footer{padding-block:26px 34px;font-size:13px;color:var(--d-muted);border-top:1p
           <li>One image for many customers.</li>
           <li>Two commands instead of eleven manual steps: one for the builder, one for the customer.</li>
           <li>Any open model by name, or the builder's own weights from a folder, a network share, or S3.</li>
-          <li>A remediation agent on both sides (see below).</li>
+          <li>Three agents on AWS AgentCore: a release agent, a customer agent, and a remediation agent (section above).</li><li>One command for the builder's first-time setup.</li>
           <li>A suite of 33 tests, eight of them attacks, and a cost guard.</li>
         </ul>
       </div>
@@ -336,13 +409,13 @@ footer{padding-block:26px 34px;font-size:13px;color:var(--d-muted);border-top:1p
     <div class="cols" style="margin-top:22px">
       <div class="card" style="grid-column:1/-1">
         <h3>The remediation agent: it watches every run, for builder and customer</h3>
-        <p style="margin:0;font-size:15px;color:var(--d-muted)">Each side runs one command. When any step of it fails, an AI agent is called with the step's output. It is the same agent on both sides; only the list of fixes it may choose differs.</p>
+        <p style="margin:0;font-size:15px;color:var(--d-muted)">Each side runs one command. When any step of it fails, an AI agent is called with the step's output. It is the same agent on both sides; only the list of fixes it may choose differs. It runs on AWS AgentCore as its own harness, apart from the agents that act.</p>
         <ul>
           <li><b>It investigates</b> with tools that can only read: why a stack failed, what the sealed machine logged, what the keys are tied to, what the person's AWS user is allowed to do, account limits, and facts about the model.</li>
           <li><b>It fixes what is safe.</b> It picks one fix from a short fixed list (wait and retry, try another machine type, remove its own half-made stack, restart the machine, make a new API key, give a customer access) and the step runs again.</li>
           <li><b>It tells the person exactly what to do</b> for everything else, in numbered steps, and continues from the same step once that is done. Examples: a missing permission (with the exact actions to request), an account limit, a model that cannot be released.</li>
           <li><b>What keeps it safe:</b> it cannot run commands, it never proposes switching a protection off, a fix that its side may not do becomes a request to a person, and every case is saved for review.</li>
-          <li><b>Seen in real runs:</b> a customer with no access to the keys, a gated model on the builder's side, no free GPU capacity (it waited and retried by itself), a fine-tune job over the builder's limits, and a real AWS "access denied" for a user who lacked the right to create the stack (it named the exact permissions to request).</li>
+          <li><b>Seen in real runs:</b> a customer with no access to the keys, a gated model on the builder's side, no free GPU capacity (it waited and retried by itself), a fine-tune job over the builder's limits, and a real AWS "access denied" for a user who lacked the right to create the stack (it named the exact permissions to request). On November 27: a CloudFormation update that could not go through, a missing right in a new role, and a half-made stack left behind.</li>
         </ul>
       </div>
     </div>
@@ -360,7 +433,7 @@ footer{padding-block:26px 34px;font-size:13px;color:var(--d-muted);border-top:1p
       <div class="stat"><b>80 to 120 s</b><span>from keys disabled to answers stopped</span></div>
       <div class="stat"><b>80 s</b><span>to fine-tune a small adapter while serving</span></div>
       <div class="stat"><b>12 min</b><span>from boot to first answer</span></div>
-      <div class="stat"><b>3</b><span>human commands for a release run by the agent</span></div>
+      <div class="stat"><b>3 agents</b><span>on AWS AgentCore: release, customer, remediation</span></div>
       <div class="stat"><b>1 stack</b><span>brings up the whole customer side, with an endpoint name that stays the same</span></div>
     </div>
     <div class="cols">
@@ -389,7 +462,7 @@ footer{padding-block:26px 34px;font-size:13px;color:var(--d-muted);border-top:1p
     </div>
   </div>
 </section>
-<footer class="dark"><div class="wrap">&copy; 2026 zeb. Proof of concept. Figures are from runs on November 20 to 24, 2026.</div></footer>
+<footer class="dark"><div class="wrap">&copy; 2026 zeb. Proof of concept. Figures are from runs on November 20 to 27, 2026.</div></footer>
 
 <script>
 const PHASES = [["Builder prepares a release", "once per model version"], ["Customer installs", "once, in their own account"], ["Every boot", "automatic, about 12 minutes"], ["While it runs", "continuous"]];
