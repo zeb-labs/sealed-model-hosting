@@ -36,7 +36,7 @@ CUSTOMER = re.compile(r"[a-z][a-z0-9-]{1,30}")
 ROLE = re.compile(r"arn:aws:iam::\d{12}:role/([\w+=,.@-]+/)*[\w+=,.@-]{1,64}")
 VERSION = re.compile(r"\d{1,3}\.\d{1,3}\.\d{1,3}")
 STACK = re.compile(r"smh-poc-oc[a-z0-9-]{0,12}")
-SIDE_OF_ONE_CUSTOMER = {"up", "test", "finetune", "restart", "remove"}        # these act on ONE customer's stack: the page says which
+SIDE_OF_ONE_CUSTOMER = {"up", "test", "finetune", "restart", "remove", "agent_up", "ask", "agent_remove"}        # these act on ONE customer's stack: the page says which
 PYTHON = os.path.join(ROOT, "sealed-model-poc", ".venv", "bin", "python")
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -49,6 +49,9 @@ ACTIONS = {
     "suite":     ("builder", "Run the full attack suite", "All 33 tests on the live release: the read-only checks, one good run, and eight attacks that must each fail. It disables and re-enables the keys on the way, so no customer can be served while it runs.", 270, True, True, []),
     "customer_setup": ("customer", "Configure this AWS account", "Once per account, before the first bring-up: a small bucket for the agent's files, the builder's install package, then the customer agent and the remediation agent on AgentCore. Give the kit folder the builder sent.", 10, False, False, ["kit"]),
     "up":        ("customer", "Bring up the customer's side", "The customer agent creates the one stack, waits for the model, makes an API key and tests the endpoint.", 27, True, True, []),
+    "agent_up":  ("customer", "Use the model through AgentCore", "Puts an agent on AgentCore Runtime, inside your network, whose model is the sealed model. It can use tools. It never sees the model's weights: it calls the endpoint like any app.", 5, False, False, []),
+    "ask":       ("customer", "Ask the agent on AgentCore", "One question to that agent. The answer comes from the sealed model, through AgentCore.", 1, False, False, ["prompt"]),
+    "agent_remove": ("customer", "Remove the agent", "Takes the agent off AgentCore Runtime. The sealed machine keeps running.", 3, False, True, []),
     "finetune":  ("customer", "Fine-tune with a file", "Sends a .jsonl data file and a form. The adapter's name is printed at the end.", 4, False, False, ["data", "steps"]),
     "test":      ("customer", "Test the endpoint", "A stand-in app inside the network calls the endpoint.", 5, False, False, []),
     "restart":   ("customer", "Restart the sealed machine", "Stop, start, and wait for the model.", 15, False, True, []),
@@ -85,6 +88,13 @@ def command(action, inputs):
         args = ["finetune", os.path.expanduser(data), steps]
     elif action == "static":
         args = ["suite", "static"]
+    elif action in ("agent_up", "agent_remove"):
+        args = [action.replace("_", "-")]
+    elif action == "ask":
+        prompt = str(inputs.get("prompt") or "").strip()
+        if not prompt or len(prompt) > 2000 or "\0" in prompt:
+            raise ValueError("type a question (up to 2000 characters)")
+        args = ["ask", prompt]          # one argument of an argument list: it never meets a shell
     elif action == "suite":
         args = ["suite", "all"]
     elif action == "onboard_customer":
@@ -252,6 +262,7 @@ class Handler(BaseHTTPRequestHandler):
 def self_test():
     assert command("ship", {})[0][-1] == "Qwen/Qwen2.5-1.5B-Instruct" and command("ship", {})[1] == {"APPROVE": "yes"}
     assert command("ship", {"model": "s3://my-bucket/models/a"})[0][-1] == "s3://my-bucket/models/a"
+    assert command("ask", {"prompt": "What is 2+2? $(id); rm -rf ~"})[0] == ["bash", "smh.sh", "ask", "What is 2+2? $(id); rm -rf ~"] and command("agent_up", {"stack": "smh-poc-oc-acme"}) == (["bash", "smh.sh", "agent-up"], {"NAME": "smh-poc-oc-acme"})
     assert command("static", {})[0] == ["bash", "smh.sh", "suite", "static"] and command("suite", {})[0] == ["bash", "smh.sh", "suite", "all"]
     assert re.search(OUTSIDE, "bash assure.sh all") and re.search(OUTSIDE, "bash smh.sh ship a/b") and not re.search(OUTSIDE, "bash smh.sh status")
     assert command("finetune", {"data": "/tmp/a.jsonl", "steps": "200"})[0][-2:] == ["/tmp/a.jsonl", "200"]
@@ -259,7 +270,7 @@ def self_test():
     assert command("customer_pause", {"name": "acme"})[0][2:] == ["customer", "pause", "acme"] and command("live", {"version": "0.10.5"})[0][2:] == ["live", "0.10.5"]
     assert command("onboard_customer", {"name": "acme", "account": "111122223333"})[0][2:] == ["onboard-customer", "acme", "111122223333"]
     assert command("up", {"stack": "smh-poc-oc-acme"})[1] == {"NAME": "smh-poc-oc-acme"} and command("up", {})[1] == {} and command("customer_setup", {})[0][2:] == ["customer-setup"]
-    for action, inputs in (("onboard_customer", {"name": "acme", "account": "12"}), ("onboard_customer", {"name": "Acme Corp", "account": "111122223333"}),
+    for action, inputs in (("ask", {}), ("ask", {"prompt": "x" * 2001}), ("onboard_customer", {"name": "acme", "account": "12"}), ("onboard_customer", {"name": "Acme Corp", "account": "111122223333"}),
                            ("up", {"stack": "smh-poc-m1-key"}), ("remove", {"stack": "smh-poc-m1-builder"}), ("customer_setup", {"kit": "x; id"}),
                            ("customer_add", {"name": "acme", "role": "*"}), ("customer_pause", {"name": "acme; id"}), ("customer_remove", {}), ("live", {"version": "latest"}),
                            ("ship", {"model": "a/b; rm -rf ~"}), ("ship", {"model": "$(id)"}), ("finetune", {"data": "/tmp/a.txt"}),

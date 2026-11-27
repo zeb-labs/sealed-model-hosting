@@ -37,6 +37,8 @@
 #   finetune <file.jsonl> [steps]        fine-tune with this file; prints the adapter's name
 #   copy-model                           copy the encrypted release into the customer's bucket, restart from it
 #   test [adapter]                       a stand-in app inside the network calls the endpoint
+#   agent-up | ask "<question>" | agent-remove   use the sealed model THROUGH AgentCore: an agent on AgentCore Runtime
+#                                        inside your network whose model is the sealed model
 #   restart | remove
 # House:
 #   demo <step>                          the ten-point demo (prepare, 1 to 10, ask "text", finish)
@@ -557,6 +559,13 @@ api-key)
   $A s3 cp --only-show-errors --sse aws:kms --sse-kms-key-id "$(out KeyArn)" "$KEYFILE" "s3://$CUST/gate/api-keys.txt"
   echo "A new API key is in $KEYFILE and in $(out ApiKeyFile). The machine picks it up within 30 seconds." ;;
 finetune) guard customer "fine-tune with a file" bash "$0" _finetune "${@:2}" ;;
+agent-up)   # CUSTOMER: use the sealed model THROUGH AgentCore: an agent on AgentCore Runtime, in your network, whose model is the sealed model
+  say "An agent on AgentCore Runtime that thinks with the sealed model (about 5 minutes)"
+  guard customer "put the agent on AgentCore Runtime" $PY consume/deploy.py up "$NAME" || exit 1
+  echo "Ask it something:  bash smh.sh ask \"What is 17 times 23?\"" ;;
+ask)        # CUSTOMER: one question to that agent; the answer comes from the sealed model
+  guard customer "ask the agent on AgentCore" $PY consume/deploy.py ask "$NAME" "${2:?a question in quotes}" ;;
+agent-remove) $PY consume/deploy.py remove "$NAME" ;;
 _finetune)
   F="${2:?a .jsonl file}"; J="ft-$(date -u +%m%d%H%M%S)"; K="$(out KeyArn)"; T="$(mktemp -d)"
   $PY -c 'import json,sys; json.dump({"method": "lora", "dataset_uri": sys.argv[1], "output_uri": sys.argv[2], "rank": 8, "alpha": 16, "learning_rate": 0.0002, "max_steps": int(sys.argv[3]), "target_modules": ["q_proj", "v_proj"], "seed": 1}, open(sys.argv[4], "w"), indent=1)' \
@@ -643,6 +652,6 @@ remove)
     echo "deleted $s"
   done ;;
 ui)   exec python3 ui/server.py ;;      # the control page: the same actions as buttons, on this machine only
-help|-h|--help) sed -n 2,52p "$0" ;;
-*) sed -n 2,52p "$0"; exit 2 ;;
+help|-h|--help) sed -n 2,56p "$0" ;;
+*) sed -n 2,56p "$0"; exit 2 ;;
 esac

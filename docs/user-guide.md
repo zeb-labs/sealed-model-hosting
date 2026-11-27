@@ -576,6 +576,51 @@ It copies about 15 GB of encrypted files into the customer's bucket and
 restarts the machine from that copy (about 25 minutes). The copy is
 unreadable without the builder's key.
 
+## 5a. Using the model: two ways
+
+Once the customer's side is up, the sealed model can be used in two ways. In
+both, the customer never sees the model's weights.
+
+**Way 1: direct inference, for your own applications.** Any program inside
+the customer's network calls the endpoint over HTTPS with an API key. The
+endpoint speaks the standard chat API (the format OpenAI uses), so existing
+libraries and tools work. Section 6 has the details.
+
+**Way 2: through AWS AgentCore.** An agent on AgentCore Runtime, in the
+customer's own account and network, whose model is the sealed model:
+
+```bash
+bash smh.sh agent-up                      # about 5 minutes
+bash smh.sh ask "What is 17 times 23?"    # the answer comes from the sealed model, through AgentCore
+bash smh.sh agent-remove
+```
+
+On the control page: Customer side tab, "Use the model through AgentCore".
+
+What `agent-up` does:
+
+1. Reads the sealed machine's certificate fingerprint from the machine's own log.
+2. Makes the agent's role (it may read its own code and the customer's API key file, nothing else) and its security group (stack `<name>-agent`).
+3. Uploads the agent's code package and creates the AgentCore Runtime in VPC mode, inside the customer's subnet.
+
+How the agent stays safe:
+
+- It calls the endpoint like any app. It has no key of the model and cannot read the weights.
+- It accepts exactly one certificate, the sealed machine's, by fingerprint. A different certificate is refused before anything is sent.
+- It reads the customer's own API key file itself; the key is never printed.
+- Its two demonstration tools (a calculator and a clock) take no free text that is executed.
+
+After the sealed machine restarts it makes a new certificate: run `bash smh.sh agent-up` again.
+
+The agent's code is one file, `consume/main.py`. It is a starting point: replace
+the two demonstration tools with your own.
+
+**A harness instead of code** (`consume/harness.py`) is a second form of way 2:
+an AgentCore harness whose model setting points at the sealed endpoint. It
+needs extra private endpoints, and must not share the sealed machine's network
+(the release check S7 refuses a network that can reach more than storage, the
+key service and logs). See `docs/m13-plan.md` for what was run.
+
 ## 6. Using the endpoint from your own app
 
 Address: the `Endpoint` output of the stack (`bash smh.sh status` shows it).

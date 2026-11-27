@@ -48,6 +48,8 @@ Full history: `docs/process-report.md`.
 choosing and releasing a model, bringing up a customer, using the endpoint,
 fine-tuning, every menu entry and command, and what to do when something goes wrong.
 
+**28 November:** the sealed model can now be used through AWS AgentCore: `bash smh.sh agent-up` puts an agent on AgentCore Runtime inside the customer's network whose model is the sealed model, with tool use (`docs/m13-plan.md`). Current release: 0.13.1.
+
 **New here?** Start with the life cycle: section 3a of the guide, or the first tab of the control page.
 
 Prefer buttons to a terminal? `bash smh.sh ui` opens a control page on your own machine (http://127.0.0.1:8765) with the same actions.

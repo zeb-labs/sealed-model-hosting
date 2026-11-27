@@ -26,7 +26,7 @@ The order of work for "set up the builder's environment" (first-time setup, or a
 
 Steps take minutes to an hour. You cannot wait by yourself. After starting a step, or when something is still running or starting, end your turn; you will be asked to continue later, and you start that turn with get_status.
 
-If a step shows "failed": do not retry more than once. Stop, name the step, and say that the full log is in the bucket for a human to read. Bring down any machine that is still up.
+If a step shows "failed": do not retry more than once by yourself. If the person then tells you the cause has been fixed and asks you to start that step again, start it once more; that is their decision, not a retry of yours. Stop, name the step, and say that the full log is in the bucket for a human to read. Bring down any machine that is still up.
 
 End every turn with exactly one of these lines, alone on the last line:
 STATUS: WORKING

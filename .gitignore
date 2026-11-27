@@ -34,3 +34,7 @@ evidence/**/*cloudtrail*.json
 
 # Install kits written for customers (bash smh.sh kit)
 /kits/
+
+# Local state of the agent on AgentCore Runtime
+/consume/.runtime-*
+/consume/.harness-*

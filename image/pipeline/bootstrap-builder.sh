@@ -41,13 +41,14 @@ umask 022; cd /
 echo "== 3. NVIDIA kernel modules for the kernel the image will get, signed with the db key =="
 dnf -y -q install nvidia-release
 # The image recipe takes the newest Amazon Linux kernel; the modules must be built for exactly that one.
-KV="$(dnf -q repoquery --releasever=latest --latest-limit 1 --qf '%{version}-%{release}' kernel)"; K="$KV.x86_64"
+# --refresh: a package list cached on this machine can be days old, and then names a kernel the image no longer gets (28 Nov).
+KV="$(dnf -q repoquery --refresh --releasever=latest --latest-limit 1 --qf '%{version}-%{release}' kernel | tail -1)"; K="$KV.x86_64"
 [ -n "$KV" ] || { echo "could not find the kernel version in the repository"; exit 1; }
 have() { modinfo -F "$1" "$NV/modules/nvidia.ko" 2>/dev/null || true; }
 if [ "$(have vermagic | cut -d' ' -f1)" = "$K" ] && [ "$(have signer)" = "$SIGNER" ]; then
   echo "modules for $K are already here"
 else
-  dnf -y -q install --releasever=latest "kernel-devel-$KV"
+  dnf -y -q install --refresh --releasever=latest "kernel-devel-$KV"
   dnf -y -q install kmod-nvidia-open-dkms || true     # its own build is for the RUNNING kernel and may fail; ours is below
   mkdir -p "/lib/modules/$K"; ln -sfn "/usr/src/kernels/$K" "/lib/modules/$K/build"    # the driver's makefile looks here
   V="$(dkms status | grep -o 'nvidia/[0-9.]*' | head -1 | cut -d/ -f2)"

@@ -1,0 +1,64 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  smh-poc, in the CUSTOMER's account: what an agent on AgentCore Runtime needs
+  to use the sealed model. A role that may read the agent's own code package
+  and the customer's API key file, and nothing else; and a security group for
+  the agent's network interfaces, which may open HTTPS inside this network
+  only. The agent never gets a key of the model: it calls the sealed machine's
+  endpoint like any app. Tags come from the stack tags.
+
+Parameters:
+  Name: {Type: String, AllowedPattern: "smh-poc-oc[a-z0-9-]{0,12}", Description: The customer's stack name}
+  VpcId: {Type: "AWS::EC2::VPC::Id"}
+  CustomerBucket: {Type: String}
+  CustomerKeyArn: {Type: String}
+  CodeBucket: {Type: String, Description: The bucket that holds the agent's code package}
+  RolePath: {Type: String, Default: /zl/}
+
+Resources:
+  AgentSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${Name}-agent-sg"
+      GroupDescription: Agent on AgentCore Runtime. No inbound. Outbound HTTPS only; this network has no internet route.
+      VpcId: !Ref VpcId
+      SecurityGroupEgress: [{IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0}]
+      Tags: [{Key: Name, Value: !Sub "${Name}-agent-sg"}]
+  AgentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${Name}-agent-role"
+      Path: !Ref RolePath
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: bedrock-agentcore.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition: {StringEquals: {"aws:SourceAccount": !Ref "AWS::AccountId"}}
+      Policies:
+        - PolicyName: use-the-sealed-model
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ItsOwnCodePackage
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "arn:aws:s3:::${CodeBucket}/consume/${Name}/*"
+              - Sid: TheCustomersApiKeyFileAndNothingElseInThatBucket
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "arn:aws:s3:::${CustomerBucket}/gate/api-keys.txt"
+              - Sid: ToOpenThatFileThroughS3Only
+                Effect: Allow
+                Action: kms:Decrypt
+                Resource: !Ref CustomerKeyArn
+                Condition: {StringEquals: {"kms:ViaService": !Sub "s3.${AWS::Region}.amazonaws.com"}}
+              - Sid: ItsOwnLogs
+                Effect: Allow
+                Action: [logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents, logs:DescribeLogStreams, logs:DescribeLogGroups]
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/runtimes/*"
+
+Outputs:
+  RoleArn: {Value: !GetAtt AgentRole.Arn}
+  SecurityGroup: {Value: !Ref AgentSg}

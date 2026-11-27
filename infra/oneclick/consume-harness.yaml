@@ -1,0 +1,144 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  smh-poc, in the CUSTOMER's account: what an AgentCore HARNESS needs to use
+  the sealed model as its model, with no agent code. A harness trusts only
+  certificates from a public authority, and the sealed machine's certificate
+  is self-signed. So a PRIVATE API Gateway sits in front of the endpoint: it
+  has an Amazon certificate, is reachable only from inside this network, and
+  passes every request on unchanged, API key included. It also makes the
+  private doors the harness needs to start (ECR). Tags come from the stack tags.
+  shortcut: the hop from API Gateway to the sealed machine does not check the
+  self-signed certificate (API Gateway cannot pin one); it stays inside this
+  private network. A certificate from a public authority on the endpoint
+  removes this stack's gateway altogether.
+
+Parameters:
+  Name: {Type: String, AllowedPattern: "smh-poc-oc[a-z0-9-]{0,12}"}
+  VpcId: {Type: "AWS::EC2::VPC::Id"}
+  SubnetId: {Type: "AWS::EC2::Subnet::Id"}
+  VpcCidr: {Type: String}
+  BalancerArn: {Type: String}
+  BalancerDns: {Type: String}
+  RolePath: {Type: String, Default: /zl/}
+  LogsEndpointSg: {Type: String, Description: The security group of this network's logs endpoint}
+
+Resources:
+  DoorsSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${Name}-harness-doors-sg"
+      GroupDescription: Private endpoints for the harness (API Gateway and ECR). HTTPS from the harness only.
+      VpcId: !Ref VpcId
+      # ONLY the harness may use these doors. The sealed machine sits in the same network and must not gain a way to
+      # reach ECR, STS, Secrets Manager or AgentCore through them.
+      SecurityGroupIngress: [{IpProtocol: tcp, FromPort: 443, ToPort: 443, SourceSecurityGroupId: !Ref HarnessSg}]
+      Tags: [{Key: Name, Value: !Sub "${Name}-harness-doors-sg"}]
+  HarnessSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${Name}-harness-sg"
+      GroupDescription: Network interfaces of the harness. No inbound. Outbound HTTPS only. This network has no internet route.
+      VpcId: !Ref VpcId
+      SecurityGroupEgress: [{IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0}]
+      Tags: [{Key: Name, Value: !Sub "${Name}-harness-sg"}]
+  ApiDoor:
+    Type: AWS::EC2::VPCEndpoint
+    Properties: {VpcId: !Ref VpcId, ServiceName: !Sub "com.amazonaws.${AWS::Region}.execute-api", VpcEndpointType: Interface, PrivateDnsEnabled: true, SubnetIds: [!Ref SubnetId], SecurityGroupIds: [!Ref DoorsSg]}
+  EcrApiDoor:
+    Type: AWS::EC2::VPCEndpoint
+    Properties: {VpcId: !Ref VpcId, ServiceName: !Sub "com.amazonaws.${AWS::Region}.ecr.api", VpcEndpointType: Interface, PrivateDnsEnabled: true, SubnetIds: [!Ref SubnetId], SecurityGroupIds: [!Ref DoorsSg]}
+  AgentCoreDoor:      # the harness fetches the API key from AgentCore Identity; with no internet it needs this door
+    Type: AWS::EC2::VPCEndpoint
+    Properties: {VpcId: !Ref VpcId, ServiceName: !Sub "com.amazonaws.${AWS::Region}.bedrock-agentcore", VpcEndpointType: Interface, PrivateDnsEnabled: true, SubnetIds: [!Ref SubnetId], SecurityGroupIds: [!Ref DoorsSg]}
+  StsDoor:
+    Type: AWS::EC2::VPCEndpoint
+    Properties: {VpcId: !Ref VpcId, ServiceName: !Sub "com.amazonaws.${AWS::Region}.sts", VpcEndpointType: Interface, PrivateDnsEnabled: true, SubnetIds: [!Ref SubnetId], SecurityGroupIds: [!Ref DoorsSg]}
+  SecretsDoor:
+    Type: AWS::EC2::VPCEndpoint
+    Properties: {VpcId: !Ref VpcId, ServiceName: !Sub "com.amazonaws.${AWS::Region}.secretsmanager", VpcEndpointType: Interface, PrivateDnsEnabled: true, SubnetIds: [!Ref SubnetId], SecurityGroupIds: [!Ref DoorsSg]}
+  LogsDoorAccess:     # the network's one logs endpoint belongs to the customer's stack; let the harness reach it so it fails fast instead of waiting
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties: {GroupId: !Ref LogsEndpointSg, IpProtocol: tcp, FromPort: 443, ToPort: 443, SourceSecurityGroupId: !Ref HarnessSg, Description: !Sub "${Name} harness"}
+  EcrDkrDoor:
+    Type: AWS::EC2::VPCEndpoint
+    Properties: {VpcId: !Ref VpcId, ServiceName: !Sub "com.amazonaws.${AWS::Region}.ecr.dkr", VpcEndpointType: Interface, PrivateDnsEnabled: true, SubnetIds: [!Ref SubnetId], SecurityGroupIds: [!Ref DoorsSg]}
+
+  Link:
+    Type: AWS::ApiGateway::VpcLink
+    Properties: {Name: !Sub "${Name}-sealed-link", TargetArns: [!Ref BalancerArn]}
+  Api:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub "${Name}-sealed-model"
+      Description: Private front for the sealed model's endpoint, for an AgentCore harness. Passes requests on unchanged.
+      EndpointConfiguration: {Types: [PRIVATE], VpcEndpointIds: [!Ref ApiDoor]}
+      Policy:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action: execute-api:Invoke
+            Resource: "execute-api:/*"
+            Condition: {StringEquals: {"aws:SourceVpce": !Ref ApiDoor}}
+  Any:
+    Type: AWS::ApiGateway::Resource
+    Properties: {RestApiId: !Ref Api, ParentId: !GetAtt Api.RootResourceId, PathPart: "{proxy+}"}
+  AnyMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref Api
+      ResourceId: !Ref Any
+      HttpMethod: ANY
+      AuthorizationType: NONE          # the sealed machine's own gate checks the customer's API key
+      RequestParameters: {method.request.path.proxy: true}
+      Integration:
+        Type: HTTP_PROXY
+        IntegrationHttpMethod: ANY
+        ConnectionType: VPC_LINK
+        ConnectionId: !Ref Link
+        Uri: "https://sealed-model.smh.internal/{proxy}"      # for a private link this is only the NAME the gateway expects in the certificate; the traffic goes through the link
+        RequestParameters: {integration.request.path.proxy: method.request.path.proxy}
+        TimeoutInMillis: 29000
+  Deployed:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: AnyMethod
+    Properties: {RestApiId: !Ref Api, StageName: sealed}
+
+  HarnessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${Name}-harness-role"
+      Path: !Ref RolePath
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: bedrock-agentcore.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition: {StringEquals: {"aws:SourceAccount": !Ref "AWS::AccountId"}}
+      Policies:
+        - PolicyName: run-with-the-sealed-model
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: PullItsOwnManagedImage
+                Effect: Allow
+                Action: [ecr:GetAuthorizationToken, ecr:BatchGetImage, ecr:GetDownloadUrlForLayer, ecr:BatchCheckLayerAvailability]
+                Resource: "*"
+              - Sid: TheApiKeyHeldInAgentCoreIdentity
+                Effect: Allow
+                Action: [bedrock-agentcore:GetResourceApiKey, bedrock-agentcore:GetWorkloadAccessToken, bedrock-agentcore:GetWorkloadAccessTokenForJWT, bedrock-agentcore:GetWorkloadAccessTokenForUserId]
+                Resource: "*"
+              - Sid: WhereIdentityKeepsIt
+                Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:bedrock-agentcore-identity!*"
+              - Sid: ItsOwnLogs
+                Effect: Allow
+                Action: [logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents, logs:DescribeLogStreams, logs:DescribeLogGroups]
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/*"
+
+Outputs:
+  ApiBase: {Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/sealed/v1"}
+  RoleArn: {Value: !GetAtt HarnessRole.Arn}
+  SecurityGroup: {Value: !Ref HarnessSg}
