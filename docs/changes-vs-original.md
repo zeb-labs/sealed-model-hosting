@@ -50,7 +50,8 @@ not mention the web terminal.
 | Addition | What it does | Status |
 | --- | --- | --- |
 | One image for many customers | The customer's bucket, key and log group come from launch tags, checked for shape. They open nothing. | Run |
-| Per-customer access | One statement per customer on both keys, with the same measurements. Removing it cuts that customer off. | Run |
+| Many customers, each managed alone | A registry of customers. Onboard by AWS account number, pause, resume or remove ONE customer; both keys name every active customer under the same measurements. | Run with two customers in one account: see `docs/m12-plan.md`. |
+| Life cycle and control page | One page of buttons (`bash smh.sh ui`) with the whole life cycle explained: where the image comes from, how it is shared, what is created in the customer's account. | Run locally. |
 | Customer-side model copy | The encrypted model can sit in the customer's own bucket; it is unreadable without the builder's key. | Run |
 | Stable endpoint | An internal load balancer gives the endpoint a name that survives restarts. | Run |
 | Release agent | An AI agent (AWS AgentCore) runs the builder's release steps through fixed tools. It cannot write a key rule or read a secret. | Run |

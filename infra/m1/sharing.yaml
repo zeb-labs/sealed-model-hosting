@@ -1,0 +1,29 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  smh-poc: what the ACTIVE customers may read in the builder's bucket. One
+  statement: the machine roles from the builder's registry may fetch the
+  objects of the live release folder, and nothing else. Those objects are
+  ciphertext; the key policies decide who can ever open them. Needed when a
+  customer is in another AWS account; harmless when they are in this one.
+  Tags come from the stack tags.
+
+Parameters:
+  CustomerRoleArn: {Type: CommaDelimitedList}     # from deployer/manage.py key-params
+  CustomerRoots: {Type: CommaDelimitedList}
+  Folder: {Type: String, AllowedPattern: "m[0-9a-z-]{1,20}"}
+
+Resources:
+  ReleaseReaders:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Sub smh-poc-artifacts-${AWS::AccountId}
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: ActiveCustomersFetchTheEncryptedReleaseOnly
+            Effect: Allow
+            Principal: {AWS: !Ref CustomerRoots}
+            Action: s3:GetObject
+            Resource: !Sub arn:aws:s3:::smh-poc-artifacts-${AWS::AccountId}/${Folder}/*
+            Condition:
+              ArnEquals: {"aws:PrincipalArn": !Ref CustomerRoleArn}

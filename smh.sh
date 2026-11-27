@@ -19,11 +19,18 @@
 #                                        the two agents on AgentCore, then the agent prepares the build machine. Safe to run again.
 #   release <model> <version> <folder>   the agent prepares a release and stops for approval
 #   approve <version>                    YOU type yes; then the agent ties both keys to the image
-#   onboard [role ARN] | offboard        let one customer's machine role ask for the keys, or take that away
+#   customers                            list every customer: name, state, account, machine role
+#   onboard-customer <name> <account>    the START of the cycle for one customer: register them by AWS account number,
+#                                        give access on the keys, share the release, write their install kit (kits/<name>/)
+#   customer add <name> <role ARN>       give ONE customer access; pause | resume | remove <name> act on that one only
+#   onboard [role ARN] | offboard        the same for this laptop's own test customer
+#   models                               every release, and which one is live;  live <version>  goes back to an older one
 #   usage                                the one-click customer's usage records, as the builder may read them
 #   cutoff | restore                     disable or enable both keys (cutoff stops every sealed machine)
 #   suite static|all                     the attack suite: read-only checks (free), or everything (about 4.5 hours, 5 USD)
-# The one-click customer:
+# The customer:
+#   customer-setup <kit folder>          FIRST TIME, in the customer's own AWS account: the agent's bucket, the builder's
+#                                        install package, then the customer agent and the watcher on AgentCore
 #   link                                 print the Launch Stack link
 #   install                              the same stack from the command line; ends with the endpoint address
 #   api-key                              make an API key and put it where the machine reads it
@@ -42,7 +49,8 @@
 # stack make its own network.
 set -euo pipefail
 cd "$(dirname "$0")"
-if [ -f smh.env ]; then set -a; . ./smh.env; set +a; fi      # exported, so every script this one calls sees the same settings
+SMH_ENV="${SMH_ENV:-smh.env}"      # another settings file, for example a second customer on the same laptop
+if [ -f "$SMH_ENV" ]; then set -a; . "./$SMH_ENV"; set +a; fi      # exported, so every script this one calls sees the same settings
 PROFILE="${SMH_PROFILE:-poc-ino}"; ACCOUNT="${SMH_ACCOUNT:-111122223333}"; REGION="${SMH_REGION:-us-east-1}"
 A="aws --profile $PROFILE --region $REGION --no-cli-pager"
 [ "$($A sts get-caller-identity --query Account --output text)" = "$ACCOUNT" ] || { echo "STOP: wrong account"; exit 1; }
@@ -51,13 +59,16 @@ NAME="${NAME:-smh-poc-oc}"; STACK="$NAME"; CUST="$NAME-customer-$ACCOUNT"
 ROLE_ARN="arn:aws:iam::$ACCOUNT:role/zl/$NAME-sealed-role"
 TAGS="${SMH_TAGS:-business-unit=ai env=innovation category=rnd owner=${SMH_OWNER:-owner@example.com} app=Secure-model-hosting expire-date=recurring}"   # SMH_TAGS: your organization's own required tags
 KEYFILE="$HOME/.smh-poc/$NAME-api-key"      # the customer's API key, on this laptop only; never printed
+# The live release: the newest one, unless `smh.sh live <version>` went back to an older one.
+if [ -z "${BUILD:-}" ] && [ -f evidence/releases/LIVE ] && [ -f "evidence/releases/build-$(cat evidence/releases/LIVE)/customer-install/install.json" ]; then BUILD="evidence/releases/build-$(cat evidence/releases/LIVE)"; fi
 BUILD="${BUILD:-$(ls -d evidence/*/build-* 2>/dev/null | while read -r d; do if [ -f "$d/customer-install/install.json" ]; then echo "$d"; fi; done | sort -t- -k2 -V | tail -1)}"
 inst() { $PY -c 'import json,sys; print(json.load(open(sys.argv[1]+"/customer-install/install.json"))[sys.argv[2]])' "$BUILD" "$1"; }
 out() { $A cloudformation describe-stacks --stack-name "${2:-$STACK}" --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text; }
 say() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 params() {   # the six values the builder hands to the customer
-  echo "Ami=$(inst image) ModelKeyArn=$(inst model_key) LeaseKeyArn=$(inst lease_key) BuilderBucket=$ART" \
-       "BuilderRoleArn=arn:aws:iam::$ACCOUNT:role/zl/smh-poc-builder-role InstanceType=${TYPE:-$(inst instance_type)} Name=$NAME"
+  # The builder's bucket and account come from the install package, so this also works in the customer's own account.
+  echo "Ami=$(inst image) ModelKeyArn=$(inst model_key) LeaseKeyArn=$(inst lease_key) BuilderBucket=$(inst builder_bucket)" \
+       "BuilderRoleArn=arn:aws:iam::$(inst model_key | cut -d: -f5):role/zl/smh-poc-builder-role InstanceType=${TYPE:-$(inst instance_type)} Name=$NAME"
 }
 wait_ready() {   # the machine says MODEL READY on its console, which is also the customer's log
   local i="$1" n; say "Waiting for the model (about 12 minutes)"
@@ -118,7 +129,34 @@ waiting_release() {   # a release the agent prepared that nobody approved yet
   local t v; t="$(ls -t evidence/releases/agent-*.txt 2>/dev/null | head -1)"; [ -n "$t" ] || return 0
   if tail -3 "$t" | grep -q "FINAL STATUS: NEEDS_APPROVAL"; then v="${t##*agent-}"; echo "${v%.txt}"; fi
 }
-onboarded() { $A cloudformation describe-stacks --stack-name smh-poc-m1-key --query "Stacks[0].Parameters[?ParameterKey=='CustomerRoleArn'].ParameterValue" --output text 2>/dev/null | grep -q "role/"; }
+apply_keys() {   # write the ACTIVE customers from the registry into both key policies; the measurements stay required
+  local p; p="$($PY deployer/manage.py key-params)" || return 1
+  CUSTOMER_ROLE="$(printf '%s\n' "$p" | sed -n 1p)" CUSTOMER_ROOTS="$(printf '%s\n' "$p" | sed -n 2p)" bash infra/m1/deploy.sh key > /dev/null || return 1
+  CUSTOMER_ROLE="$(printf '%s\n' "$p" | sed -n 1p)" CUSTOMER_ROOTS="$(printf '%s\n' "$p" | sed -n 2p)" bash infra/m1/deploy.sh lease > /dev/null || return 1
+  echo "Both key policies now name $(printf '%s\n' "$p" | sed -n 1p | tr ',' '\n' | grep -c role/) active customer(s). The measurements are still required; a role alone gets nothing."
+}
+share_release() {   # what the ACTIVE customers need besides the keys: read on the live release's folder, and the image
+  local p roles roots acct snap; p="$($PY deployer/manage.py key-params)" || return 1
+  roles="$(printf '%s\n' "$p" | sed -n 1p)"; roots="$(printf '%s\n' "$p" | sed -n 2p)"
+  if [ -z "$roles" ]; then
+    if $A cloudformation describe-stacks --stack-name smh-poc-m1-sharing >/dev/null 2>&1; then $A cloudformation delete-stack --stack-name smh-poc-m1-sharing; $A cloudformation wait stack-delete-complete --stack-name smh-poc-m1-sharing; fi
+    echo "No active customer: nobody but the builder can read the release folder."; return 0
+  fi
+  # shellcheck disable=SC2086
+  $A cloudformation deploy --stack-name smh-poc-m1-sharing --template-file infra/m1/sharing.yaml --no-fail-on-empty-changeset --tags $TAGS \
+    --parameter-overrides CustomerRoleArn="$roles" CustomerRoots="$roots" Folder="$(inst folder)" >/dev/null || return 1
+  echo "The active customers may fetch the encrypted release $(inst version) (folder $(inst folder)) and nothing else in the bucket."
+  # A customer in ANOTHER account must also be allowed to start machines from the image. Not needed, and not run, in one account.
+  for acct in $(printf '%s' "$roots" | tr ',' '\n' | cut -d: -f5 | sort -u); do
+    if [ "$acct" != "$ACCOUNT" ]; then
+      snap="$(cut -d' ' -f2 "$BUILD/ami-id.txt" 2>/dev/null || true)"
+      $A ec2 modify-image-attribute --image-id "$(inst image)" --launch-permission "Add=[{UserId=$acct}]" || return 1
+      if [ -n "$snap" ]; then $A ec2 modify-snapshot-attribute --snapshot-id "$snap" --attribute createVolumePermission --operation-type add --user-ids "$acct" || return 1; fi
+      echo "Image $(inst image) shared with account $acct."
+    fi
+  done
+}
+onboarded() { $A cloudformation describe-stacks --stack-name smh-poc-m1-key --query "Stacks[0].Parameters[?ParameterKey=='CustomerRoleArn'].ParameterValue" --output text 2>/dev/null | tr ',' '\n' | grep -qx "$ROLE_ARN"; }
 installed() {   # the customer's stack exists and is not half-made or half-deleted
   case "$($A cloudformation describe-stacks --stack-name "$STACK" --query 'Stacks[0].StackStatus' --output text 2>/dev/null || true)" in
     CREATE_COMPLETE|UPDATE_COMPLETE|UPDATE_ROLLBACK_COMPLETE) return 0;; *) return 1;; esac
@@ -290,7 +328,7 @@ MENU
 case "${1:-menu}" in
 menu) menu ;;
 builder) builder_menu ;;
-customer) customer_menu ;;
+customer) if [ $# -gt 1 ]; then exec bash "$0" _customer "${@:2}"; else customer_menu; fi ;;     # with words after it: manage ONE customer (below)
 more) more_menu ;;
 setup)  # the builder's side from nothing: fixed stacks by this command, the build machine by the agent
   say "First-time setup of the builder's side. What exists is left alone."
@@ -366,6 +404,7 @@ print("  all %d checks PASS, image check OK: approving as agreed at the start" %
   fi
   say "Step 3 of 3: customer access"
   guard builder "give the customer access" bash "$0" onboard
+  rm -f evidence/releases/LIVE      # the newest release is the live one again
   say "Release $V is live. The customer can now run: bash smh.sh up" ;;
 up)     # the customer's whole job in one command
   say "Setting up the customer's side: network, sealed machine, API key, test call (about 25 minutes)"
@@ -413,11 +452,78 @@ approve)
   $A s3 sync --only-show-errors --exclude "*.packages" "s3://$ART/build/out-$2/" "$D/"
   $A s3 cp --only-show-errors "s3://$ART/deploy/$2/logs/build.log" "$D/pipeline.log"
   echo "build folder: $D" ;;
-onboard|offboard)
-  R="${2:-$ROLE_ARN}"; if [ "$1" = offboard ]; then R=""; fi
-  say "Key policies: customer role = ${R:-nobody}"
-  CUSTOMER_ROLE="$R" bash infra/m1/deploy.sh key > /dev/null; CUSTOMER_ROLE="$R" bash infra/m1/deploy.sh lease > /dev/null
-  echo "done. The measurements are still required; the role alone gets nothing." ;;
+onboard|offboard)   # this laptop's own customer ($NAME): the short form of  customer add|pause
+  if [ "$1" = onboard ]; then $PY deployer/manage.py customer add "$NAME" "${2:-$ROLE_ARN}"; else $PY deployer/manage.py customer pause "$NAME"; fi
+  apply_keys; share_release ;;
+onboard-customer)   # BUILDER, the start of the cycle for one customer: register, give access, share the release, write their install kit
+  N="${2:?a short name, like acme}"; AC="${3:?their 12-digit AWS account number}"
+  say "Onboarding customer $N (AWS account $AC)"
+  echo "Step 1 of 4: register"; $PY deployer/manage.py customer add "$N" "$AC"
+  echo "Step 2 of 4: access on both keys (the measurements stay required)"; apply_keys
+  echo "Step 3 of 4: share the release"; share_release
+  echo "Step 4 of 4: the install kit"; bash "$0" kit "$N" ;;
+kit)   # BUILDER: the folder to hand to one customer. It holds no secret: an install package and a settings file.
+  N="${2:?customer name}"; D="kits/$N"
+  ROW="$($PY deployer/manage.py customers --json | $PY -c 'import json,sys; r=[c for c in json.load(sys.stdin) if c["name"]==sys.argv[1]]; print(r[0]["stack"], r[0]["account"]) if r else sys.exit("no customer of that name: bash smh.sh customers")' "$N")"
+  mkdir -p "$D"; cp "$BUILD/customer-install/install.json" "$D/install.json"
+  cat > "$D/smh.env" <<KIT
+# Settings for the customer "$N". Put this file, as smh.env, into your copy of the code.
+SMH_ACCOUNT=${ROW##* }
+SMH_PROFILE=default                  # the AWS CLI profile you use for that account
+SMH_REGION=$REGION
+SMH_OWNER=owner@example.com          # the value of the owner tag on everything this creates
+NAME=${ROW%% *}                      # your stack's name. The builder has registered exactly this name: do not change it
+SMH_AGENT_MODEL=REPLACE_WITH_YOUR_BEDROCK_INFERENCE_PROFILE
+export SMH_ACCOUNT SMH_PROFILE SMH_REGION SMH_OWNER NAME SMH_AGENT_MODEL
+KIT
+  cat > "$D/README.md" <<KIT
+# Install kit for $N
+
+From the model builder, for release $(inst version). Nothing in this folder is a secret.
+
+1. Get the code: https://github.com/zeb-labs/sealed-model-hosting
+2. Copy \`smh.env\` from this folder into the code's folder and fill in the three lines marked in it (your AWS profile, your owner tag, a Claude inference profile on Amazon Bedrock that your account may use).
+3. Configure your AWS account, once (about 10 minutes): \`bash smh.sh customer-setup <this folder>\`
+4. Bring up your side (about 30 minutes): \`bash smh.sh up\`  or press "Bring up the customer's side" on the page (\`bash smh.sh ui\`).
+
+It ends with your endpoint and an API key on your own machine. The model runs in your account; you cannot read it, and the builder cannot read your data.
+If a step fails, an AI agent looks into it and tells you what to do.
+KIT
+  echo "Kit written: $D/ (install.json, smh.env, README.md). Send that folder to the customer." ;;
+customer-setup)   # CUSTOMER, once per AWS account: a small bucket for the agent's files, the install package, then the customer agent and the watcher
+  K="${2:-}"
+  say "Configuring this AWS account ($ACCOUNT) for the customer's side"
+  if [ -n "$K" ]; then
+    [ -f "$K/install.json" ] || { echo "No install.json in $K: that is not the builder's kit folder."; exit 1; }
+    V="$($PY -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$K/install.json")"
+    mkdir -p "evidence/releases/build-$V/customer-install"; cp "$K/install.json" "evidence/releases/build-$V/customer-install/install.json"
+    BUILD="evidence/releases/build-$V"; echo "  install package: release $V"
+  fi
+  if $A s3api head-bucket --bucket "$ART" >/dev/null 2>&1; then echo "  exists    bucket $ART"
+  else echo "  creating  bucket $ART"
+    # shellcheck disable=SC2086
+    guard customer "create the agent's bucket" $A cloudformation deploy --stack-name smh-poc-oc-agent-base --template-file infra/oneclick/agent-base.yaml --no-fail-on-empty-changeset --tags $TAGS || exit 1
+  fi
+  $A s3 cp --only-show-errors "$BUILD/customer-install/install.json" "s3://$ART/build/out-$(inst version)/customer-install/install.json"
+  for f in infra/oneclick/customer.yaml infra/oneclick/app.yaml infra/m1/client-test.sh; do $A s3 cp --only-show-errors "$f" "s3://$ART/build/src/$f"; done
+  say "The customer agent and the watcher on AgentCore"
+  guard customer "set up the customer agent" env ONLY=smh_poc_customer bash deployer/setup.sh || exit 1
+  guard customer "set up the watcher" env ONLY=smh_poc_watcher bash deployer/setup.sh || exit 1
+  say "This account is configured. Next: bash smh.sh up" ;;
+customers) say "Customers"; $PY deployer/manage.py customers ;;
+_customer)   # customer add <name> <machine role ARN> | pause <name> | resume <name> | remove <name>   (one customer; the others are untouched)
+  case "${2:-}" in add|pause|resume|remove) ;; *) echo "customer add <name> <machine role ARN> | pause <name> | resume <name> | remove <name>"; exit 2;; esac
+  $PY deployer/manage.py customer "${@:2}"
+  apply_keys
+  share_release
+  case "$2" in pause|remove) echo "That customer's sealed machine stops within about four minutes: its lease can no longer be renewed.";; esac ;;
+models) say "Releases"; $PY deployer/manage.py models ;;
+live)   # tie the keys to an older, approved release again (every customer then runs that one)
+  V="${2:?a version from: bash smh.sh models}"; mkdir -p evidence/releases; T="evidence/releases/agent-live-$V.txt"
+  [ -f "evidence/releases/build-$V/customer-install/install.json" ] || { echo "This laptop has no build folder for $V (evidence/releases/build-$V)."; exit 1; }
+  say "Making release $V the live one (about 10 minutes)"; echo "  Full notes: $T"
+  OUT="$T" PAUSE=60 bash deployer/run.sh "Tie the keys to version $V again. Start with get_status for $V and believe only its approved field. Bring the builder up; when it is online call pin_keys; when pin is done bring the builder down." 2>&1 | shown || true
+  if tail -3 "$T" | grep -q "FINAL STATUS: DONE"; then echo "$V" > evidence/releases/LIVE; echo "Release $V is live. Sealed machines must restart to load it."; else echo "Not switched. Read $T."; exit 1; fi ;;
 link)
   $A s3 cp --only-show-errors infra/oneclick/customer.yaml "s3://$ART/oneclick/customer.yaml"
   Q="stackName=$NAME&templateURL=https://$ART.s3.$REGION.amazonaws.com/oneclick/customer.yaml"
@@ -537,6 +643,6 @@ remove)
     echo "deleted $s"
   done ;;
 ui)   exec python3 ui/server.py ;;      # the control page: the same actions as buttons, on this machine only
-help|-h|--help) sed -n 2,40p "$0" ;;
-*) sed -n 2,40p "$0"; exit 2 ;;
+help|-h|--help) sed -n 2,52p "$0" ;;
+*) sed -n 2,52p "$0"; exit 2 ;;
 esac

@@ -95,12 +95,13 @@ def key_policy(test_id: str, policy: Dict[str, Any], sealed_role_arn: str, pcrs:
         principals = [str(p) for p in _list(st["Principal"].get("AWS", [])) ] if isinstance(st.get("Principal"), dict) else [str(st.get("Principal"))]
         actions = [str(a).lower() for a in _list(st.get("Action", []))]
         sid = st.get("Sid", "?")
-        # M10: one onboarded customer role. The account is the principal, but a
-        # condition narrows it to exactly one role, and the PCR conditions below still apply.
-        named = st.get("Condition", {}).get("ArnEquals", {}).get("aws:PrincipalArn")
-        customer = (len(principals) == 1 and principals[0].endswith(":root") and actions == ["kms:decrypt"]
-                    and isinstance(named, str) and re.fullmatch(r"arn:aws:iam::\d{12}:role/[\w+=,.@/-]+", named) is not None
-                    and named.startswith(principals[0][:-len("root")] + "role/"))
+        # The onboarded customers' roles. Their accounts are the principals, but a condition narrows
+        # them to exactly the named roles, and the PCR conditions below still apply. Every account
+        # named must have a role named, and every role must be in a named account.
+        named = [str(n) for n in _list(st.get("Condition", {}).get("ArnEquals", {}).get("aws:PrincipalArn", []))]
+        customer = (bool(principals) and bool(named) and actions == ["kms:decrypt"] and all(p.endswith(":root") for p in principals)
+                    and all(re.fullmatch(r"arn:aws:iam::\d{12}:role/[\w+=,.@/-]+", n) is not None for n in named)
+                    and {n.split(":role/")[0] + ":root" for n in named} == set(principals))
         for p in principals:
             if (p == "*" or p.endswith(":root")) and not customer:
                 problems.append(f"statement {sid} is account-wide ({p})")
@@ -121,10 +122,10 @@ def key_policy(test_id: str, policy: Dict[str, Any], sealed_role_arn: str, pcrs:
             problems.append(f"statement {sid} has an unexpected condition operator")
         releases += 1
     if len(customers) > 1:
-        problems.append(f"{len(customers)} onboarded customer roles, expected at most 1")
+        problems.append(f"{len(customers)} customer statements, expected at most 1")
     if releases - len(customers) != 1 and not problems:
         problems.append(f"{releases - len(customers)} release statements for the sealed role, expected exactly 1")
-    also = f"; one onboarded customer role ({customers[0].split('/')[-1]}) with the same values" if customers else ""
+    also = f"; {len(customers[0])} onboarded customer role(s) ({', '.join(n.split('/')[-1] for n in customers[0][:4])}) with the same values" if customers else ""
     return _result(test_id, problems, "one release statement, sealed role only, PCR4/7/12/15 pinned to this build" + also)
 
 

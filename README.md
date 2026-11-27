@@ -48,6 +48,8 @@ Full history: `docs/process-report.md`.
 choosing and releasing a model, bringing up a customer, using the endpoint,
 fine-tuning, every menu entry and command, and what to do when something goes wrong.
 
+**New here?** Start with the life cycle: section 3a of the guide, or the first tab of the control page.
+
 Prefer buttons to a terminal? `bash smh.sh ui` opens a control page on your own machine (http://127.0.0.1:8765) with the same actions.
 
 There is one script for everyone. You need a laptop that is signed in to the

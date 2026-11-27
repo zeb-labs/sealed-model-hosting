@@ -102,7 +102,7 @@ You do not need the terminal after the first line:
 bash smh.sh ui          # then open http://127.0.0.1:8765 in your browser
 ```
 
-The page has three tabs (model builder, customer, house). Each button runs one
+The page has five tabs: Builder, Customers, Models, Customer side, House. Each button runs one
 fixed command of `smh.sh`; an agent on AgentCore does the work. On the right
 you see what the agent is doing, how long it has run, and, if a step fails,
 the remediation agent's finding and the exact steps for you. Actions that
@@ -114,7 +114,10 @@ start paid machines are marked and ask once before they start.
 | Ship a model | `APPROVE=yes bash smh.sh ship <model>`: approved by itself only when all six checks pass |
 | Give or take the customer's access | `onboard`, `offboard` |
 | Bring up the customer's side, test, fine-tune, restart, remove | `up`, `test`, `finetune`, `restart`, `remove` |
-| Refresh status, switch everything off, stop or allow every customer | `status`, `off`, `cutoff`, `restore` |
+| Run the full attack suite (about 4.5 hours) | `suite all` |
+| Refresh status, switch everything off, emergency stop for everyone | `status`, `off`, `cutoff`, `restore` |
+
+The page also notices long work started from a terminal (the attack suite, a release, a bring-up). While that runs it says so and refuses every button that would change something; Refresh status still works.
 
 What keeps it safe:
 
@@ -373,6 +376,111 @@ bash smh.sh offboard                # take it away again
 - One customer can be onboarded at a time in this proof of concept.
 - `offboard` cuts that one customer off. Their machine stops within about 4 minutes (Run). Other customers are not touched.
 - A new release keeps the onboarded customer (Run).
+
+## 3a. The life cycle: where the image comes from, and what lands in the customer's account
+
+The same content is the first tab of the control page (`bash smh.sh ui`).
+
+**A. The builder makes a release** (`bash smh.sh ship`)
+- The release agent encrypts the model and puts the files in the builder's S3 bucket, one folder per release.
+- The build machine builds the sealed image from the recipe, with the fingerprints of those files inside, and signs it.
+- The image is registered as an AMI (an Amazon machine image) **in the builder's account**. Both keys are tied to that image's measurements.
+
+**B. The builder onboards a customer** (`bash smh.sh onboard-customer <name> <account>`)
+- The AMI is **shared** with the customer's AWS account. It is not copied. It holds no model and no key.
+- The customer's machine role may read that one release folder in the builder's bucket. The files are ciphertext.
+- The keys are **never shared**. The key policies name the customer's machine role and still require the image's measurements.
+- An install kit is written: image ID, key ARNs, bucket name, settings.
+
+**C. The customer configures their AWS account** (`bash smh.sh customer-setup <kit>`, once)
+- A small private bucket for the agent's own files.
+- The customer agent and the remediation agent on AgentCore, in the customer's own account.
+
+**D. The customer brings it up** (`bash smh.sh up`)
+- The customer agent creates ONE CloudFormation stack (`infra/oneclick/customer.yaml`). It holds all the supporting runtime:
+
+| Created in the customer's account | What for |
+| --- | --- |
+| A private network, no internet, with three private endpoints (S3, KMS, logs) | The machine can reach storage, the key service and the log, and nothing else |
+| The customer's own S3 bucket | Their data, fine-tuned adapters, API keys, usage records |
+| The customer's own KMS key | Protects everything in that bucket |
+| A log group | The machine's log, readable by the customer |
+| The machine's role and profile | The role the builder named on the keys |
+| The sealed machine | Started from the shared AMI |
+| An internal load balancer | The endpoint, with a name that survives restarts |
+
+- The agent then makes an API key and tests the endpoint.
+
+**E. Every boot, by itself**
+- The machine proves to KMS what it booted, gets the model's key once, locks itself, and streams the encrypted model to the GPU.
+
+**F. Running, and the end**
+- The customer calls the endpoint and fine-tunes. The builder reads usage counts, and can pause, resume or remove that one customer.
+- A new release: `ship` again; each customer's machine loads it at its next restart.
+
+## 4. The full cycle for one customer, from onboarding
+
+| # | Who | Step | Command | On the page |
+| --- | --- | --- | --- | --- |
+| 1 | Builder | Onboard: register the customer by AWS account number, give access on both keys, share the release, write the install kit | `bash smh.sh onboard-customer acme 111122223333` | Customers tab, "Onboard a new customer" |
+| 2 | Builder | Send the folder `kits/acme/` to the customer. It holds no secret | | |
+| 3 | Customer | Configure their own AWS account, once: the agent's bucket, the install package, the customer agent and the remediation agent on AgentCore | `bash smh.sh customer-setup <kit folder>` | Customer side tab, "Configure this AWS account" |
+| 4 | Customer | Bring up: one stack, the sealed machine proves itself and loads the model, an API key, a test | `bash smh.sh up` | Customer side tab, "Bring up the customer's side" |
+| 5 | Both | Run: the customer calls the endpoint and fine-tunes; the builder reads usage counts | `finetune`, `usage` | Customer side and Builder tabs |
+| 6 | Builder | Pause, resume or remove that one customer | `bash smh.sh customer pause acme` | Customers tab, the customer's row |
+
+How step 1 can come before the customer has installed anything: the customer's
+stack is named `smh-poc-oc-<name>`, and its machine role
+`role/zl/smh-poc-oc-<name>-sealed-role` in their account. So the role is known
+from the name and the account number alone.
+
+What "share the release" does: the active customers' machine roles may fetch
+the objects of the live release's folder in the builder's bucket (ciphertext
+only; stack `smh-poc-m1-sharing`), and, for a customer in another account, the
+image is shared with that account.
+
+The kit (`kits/<name>/`): `install.json` (image, the two key ARNs, the
+builder's bucket), a filled-in `smh.env` (their account, their stack's name),
+and a `README.md` with the four steps. The customer adds three things to
+`smh.env`: their AWS profile, their owner tag, and a Claude inference profile
+on Amazon Bedrock that their account may use.
+
+**Said plainly:** we have one AWS account. Steps 1 to 6 were run with the
+customer in the SAME account as the builder (see `docs/m12-plan.md`). The
+parts that only matter across two accounts (sharing the image, the bucket
+rule, the customer's own agent bucket) are written and were not run.
+
+## 4a. Many customers, and many releases
+
+A builder with ten customers manages each one alone.
+
+```bash
+bash smh.sh customers                                  # the list: name, state, account, since when, machine role
+bash smh.sh customer add acme arn:aws:iam::111122223333:role/zl/acme-sealed-role
+bash smh.sh customer pause acme                        # only acme stops, within about four minutes
+bash smh.sh customer resume acme
+bash smh.sh customer remove acme
+```
+
+- A customer is a name and the ARN of the role their sealed machine runs as. Their stack prints it; it may be in another AWS account.
+- The list is one small file in the builder's bucket (`deploy/customers/registry.json`).
+- Only ACTIVE customers are written into the two key policies, in one statement, each under the same measurements. A role alone still gets nothing.
+- Pausing one customer removes only that role. Its machine can no longer renew its lease and stops; the others never notice.
+- `bash smh.sh cutoff` (disable both keys for everyone) is kept for an emergency only.
+- Limit today: about 45 active customers (one CloudFormation parameter). Beyond that the policy must be written from the list directly.
+
+Releases:
+
+```bash
+bash smh.sh models            # every release: model, state (live, available, not usable), image
+bash smh.sh live 0.10.5       # tie the keys to an older approved release again
+```
+
+One release is live at a time: the keys are tied to its image, and every customer runs it. Different customers on different models at the same time is not built; it needs one set of measurements per release in the key policies.
+
+On the control page these are the **Customers** and **Models** tabs, with a button per row.
+
+What was run is in `docs/m12-plan.md`.
 
 ## 5. The customer: install with one stack
 

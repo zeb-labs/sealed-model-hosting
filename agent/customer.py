@@ -168,7 +168,8 @@ def install(aws, name, machine_type):
         raise Refused("the builder's install package for that release is not in the bucket")
     p = json.loads(package)
     params = {"Ami": p["image"], "ModelKeyArn": p["model_key"], "LeaseKeyArn": p["lease_key"], "BuilderBucket": p["builder_bucket"],
-              "BuilderRoleArn": f"arn:aws:iam::{aws.account}:role/zl/smh-poc-builder-role", "InstanceType": machine_type, "Name": name}
+              # the builder's role lives in the BUILDER's account, which is the account of the model key
+              "BuilderRoleArn": f"arn:aws:iam::{p['model_key'].split(':')[4]}:role/zl/smh-poc-builder-role", "InstanceType": machine_type, "Name": name}
     for key, value in (request.get("extra") or {}).items():
         if key not in EXTRAS or not re.fullmatch(EXTRAS[key], str(value)):
             raise Refused(f"the install request has a setting that is not allowed: {key}")

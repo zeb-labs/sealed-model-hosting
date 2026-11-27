@@ -28,3 +28,9 @@ evidence/**/*cloudtrail*.json
 /.env
 .env.*
 !smh.env.example
+
+# A second local customer for tests
+/smh-*.env
+
+# Install kits written for customers (bash smh.sh kit)
+/kits/

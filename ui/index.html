@@ -32,8 +32,10 @@ header .title{margin-right:auto;display:grid;gap:2px}
 .tile b{font-family:var(--display);font-weight:500;font-size:17px;overflow-wrap:anywhere}
 main{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:28px;align-items:start;padding-bottom:56px}
 @media (max-width:900px){main{grid-template-columns:minmax(0,1fr)}}
-.tabs{display:inline-flex;border:1px solid var(--border);border-radius:100px;padding:4px;gap:4px;margin:12px 0 16px}
-.tabs button{font:inherit;font-weight:600;font-size:14px;border:0;background:transparent;color:var(--text);border-radius:100px;padding:8px 18px;min-height:40px;cursor:pointer}
+main.wide{grid-template-columns:minmax(0,1fr)}
+main.wide .run{position:static}
+.tabs{display:inline-flex;flex-wrap:wrap;border:1px solid var(--border);border-radius:100px;padding:4px;gap:4px;margin:12px 0 16px}
+.tabs button{font:inherit;font-weight:600;font-size:14px;border:0;background:transparent;color:var(--text);border-radius:100px;padding:8px 15px;min-height:40px;cursor:pointer}
 .tabs button[aria-selected="true"]{background:var(--beige);color:var(--charcoal)}
 .list{display:grid;gap:10px}
 .act{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:16px 18px;display:grid;gap:10px}
@@ -72,6 +74,24 @@ input{font:inherit;font-size:14px;background:var(--charcoal);color:var(--text);b
 details summary{cursor:pointer;font-size:13.5px;color:var(--muted);min-height:32px}
 pre{margin:8px 0 0;background:var(--charcoal);border:1px solid var(--border);border-radius:12px;padding:12px;font:12px/1.5 var(--mono);max-height:320px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}
 .err{color:var(--warn);font-size:14px}
+.tablewrap{overflow-x:auto;background:var(--surface);border:1px solid var(--border);border-radius:16px}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{text-align:left;padding:12px 14px;border-bottom:1px solid var(--border);vertical-align:middle}
+tr:last-child td{border-bottom:0}
+th{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:600}
+td.small{font-size:12.5px;color:var(--muted);white-space:nowrap}
+td div.small{font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}
+td.acts{white-space:nowrap;text-align:right}
+td .btn{min-height:36px;padding:6px 14px;font-size:13px;margin-right:6px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:100px;background:var(--muted);margin-right:8px}
+.dot.on{background:var(--lime)}
+.hint{font-size:13.5px;color:var(--muted);margin:0 0 12px}
+.scroll{overflow-x:auto}
+ul.plain{margin:0;padding-left:18px;display:grid;gap:6px;font-size:14px;color:var(--text)}
+.cycle{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;counter-reset:c}
+.cycle li{border-top:2px solid var(--lime-deep);padding-top:10px;display:grid;gap:4px;align-content:start;counter-increment:c}
+.cycle li b::before{content:counter(c) ". "}
+.cycle .pill{justify-self:start}
 footer{border-top:1px solid var(--border);padding:18px 0 28px;font-size:13px;color:var(--muted)}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
@@ -87,10 +107,13 @@ footer{border-top:1px solid var(--border);padding:18px 0 28px;font-size:13px;col
 
   <main>
     <section aria-labelledby="h-actions">
-      <h2 id="h-actions">What do you want to do?</h2>
+      <h2 id="h-actions">How it works, and what you can do</h2>
       <div class="tabs" role="tablist" aria-label="Who you are">
-        <button role="tab" data-side="builder" aria-selected="true" type="button">Model builder</button>
-        <button role="tab" data-side="customer" aria-selected="false" type="button">Customer</button>
+        <button role="tab" data-side="life" aria-selected="true" type="button">Life cycle</button>
+        <button role="tab" data-side="builder" aria-selected="false" type="button">Builder</button>
+        <button role="tab" data-side="customers" aria-selected="false" type="button">Customers</button>
+        <button role="tab" data-side="models" aria-selected="false" type="button">Models</button>
+        <button role="tab" data-side="customer" aria-selected="false" type="button">Customer side</button>
         <button role="tab" data-side="house" aria-selected="false" type="button">House</button>
       </div>
       <div class="list" id="list"></div>
@@ -101,6 +124,7 @@ footer{border-top:1px solid var(--border);padding:18px 0 28px;font-size:13px;col
       <div class="runhead"><h2 id="h-run">Nothing is running</h2><span class="state" id="state">idle</span></div>
       <div class="bar" aria-hidden="true"><i id="bar"></i></div>
       <p class="now muted" id="now">Pick an action on the left. An AI agent on AWS AgentCore does the work; this page shows what it is doing.</p>
+      <div class="advice" id="outside" hidden><h3>Something is running outside this page</h3><p id="outside-what"></p></div>
       <div class="advice" id="advice" hidden><h3>The remediation agent looked into a failure</h3><p id="advice-what"></p><ol id="advice-steps"></ol></div>
       <ol class="steps" id="steps"></ol>
       <details><summary>Full output</summary><pre id="log"></pre></details>
@@ -109,11 +133,17 @@ footer{border-top:1px solid var(--border);padding:18px 0 28px;font-size:13px;col
 </div>
 <footer><div class="wrap">&copy; 2026 zeb. This page runs on your own machine and uses your AWS login. Each button runs one fixed command.</div></footer>
 
+<template id="lifecycle"><p class="hint">Where the machine image comes from, how it reaches a customer, and what is created in the customer's AWS account. In order.</p><div class="act"><div class="scroll"><svg viewBox="0 0 1000 400" role="img" aria-label="Life cycle. In the builder's account the build machine makes the image and registers it as an AMI, the encrypted model sits in an S3 bucket, and two keys sit in KMS. Onboarding shares the AMI and read access to the release folder with the customer's account and names the customer's machine role on the keys. In the customer's account one stack creates a private network, a bucket, a key, a log group, a role, the sealed machine from the shared AMI, and the endpoint." style="display:block;width:100%;height:auto;min-width:860px"><defs><marker id="la" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#CEF79F"/></marker></defs><g font-family="Inter, system-ui, sans-serif" fill="#E7E8E1"><rect x="10" y="20" width="330" height="360" rx="16" fill="none" stroke="rgba(231,232,225,.35)"/><text x="30" y="46" font-size="11" font-weight="600" letter-spacing="1.6">BUILDER'S AWS ACCOUNT</text><rect x="560" y="20" width="430" height="360" rx="16" fill="none" stroke="rgba(231,232,225,.35)"/><text x="580" y="46" font-size="11" font-weight="600" letter-spacing="1.6">CUSTOMER'S AWS ACCOUNT</text><rect x="30" y="62" width="290" height="50" rx="10" fill="#222F30" stroke="rgba(231,232,225,.3)" stroke-width="1.4"/><text x="175.0" y="83" text-anchor="middle" font-weight="600" font-size="13">Build machine</text><text x="175.0" y="100" text-anchor="middle" font-size="11.5" fill-opacity=".7">builds, signs and registers the image</text><rect x="30" y="132" width="290" height="50" rx="10" fill="#222F30" stroke="#CEF79F" stroke-width="1.4"/><text x="175.0" y="153" text-anchor="middle" font-weight="600" font-size="13">AMI (the sealed image)</text><text x="175.0" y="170" text-anchor="middle" font-size="11.5" fill-opacity=".7">stays in the builder's account</text><rect x="30" y="202" width="290" height="50" rx="10" fill="#222F30" stroke="rgba(231,232,225,.3)" stroke-width="1.4"/><text x="175.0" y="223" text-anchor="middle" font-weight="600" font-size="13">S3 bucket</text><text x="175.0" y="240" text-anchor="middle" font-size="11.5" fill-opacity=".7">the encrypted model, one folder per release</text><rect x="30" y="272" width="290" height="50" rx="10" fill="#222F30" stroke="#CEF79F" stroke-width="1.4"/><text x="175.0" y="293" text-anchor="middle" font-weight="600" font-size="13">Two keys in KMS</text><text x="175.0" y="310" text-anchor="middle" font-size="11.5" fill-opacity=".7">tied to that image's measurements</text><text x="175" y="352" text-anchor="middle" font-size="11.5" fill-opacity=".7">made by: bash smh.sh setup, then ship</text><rect x="580" y="62" width="190" height="50" rx="10" fill="#222F30" stroke="rgba(231,232,225,.3)" stroke-width="1.4"/><text x="675.0" y="83" text-anchor="middle" font-weight="600" font-size="13">Agent bucket, 2 agents</text><text x="675.0" y="100" text-anchor="middle" font-size="11.5" fill-opacity=".7">customer-setup, once</text><rect x="580" y="126" width="390" height="226" rx="12" fill="#2A383A" stroke="#CEF79F" stroke-width="1.2"/><text x="596" y="146" font-size="11" font-weight="600" letter-spacing="1.4" fill="#CEF79F">ONE STACK, CREATED BY: bash smh.sh up</text><rect x="596" y="156" width="174" height="50" rx="10" fill="#222F30" stroke="rgba(231,232,225,.3)" stroke-width="1.4"/><text x="683.0" y="177" text-anchor="middle" font-weight="600" font-size="13">Private network</text><text x="683.0" y="194" text-anchor="middle" font-size="11.5" fill-opacity=".7">no internet; S3, KMS, logs</text><rect x="782" y="156" width="174" height="50" rx="10" fill="#222F30" stroke="#CEF79F" stroke-width="1.4"/><text x="869.0" y="177" text-anchor="middle" font-weight="600" font-size="13">Sealed machine</text><text x="869.0" y="194" text-anchor="middle" font-size="11.5" fill-opacity=".7">started from the shared AMI</text><rect x="596" y="218" width="174" height="50" rx="10" fill="#222F30" stroke="rgba(231,232,225,.3)" stroke-width="1.4"/><text x="683.0" y="239" text-anchor="middle" font-weight="600" font-size="13">Customer's bucket</text><text x="683.0" y="256" text-anchor="middle" font-size="11.5" fill-opacity=".7">data, adapters, API keys, usage</text><rect x="782" y="218" width="174" height="50" rx="10" fill="#222F30" stroke="rgba(231,232,225,.3)" stroke-width="1.4"/><text x="869.0" y="239" text-anchor="middle" font-weight="600" font-size="13">Endpoint</text><text x="869.0" y="256" text-anchor="middle" font-size="11.5" fill-opacity=".7">HTTPS, needs an API key</text><rect x="596" y="280" width="174" height="50" rx="10" fill="#222F30" stroke="rgba(231,232,225,.3)" stroke-width="1.4"/><text x="683.0" y="301" text-anchor="middle" font-weight="600" font-size="13">Customer's key, log group</text><text x="683.0" y="318" text-anchor="middle" font-size="11.5" fill-opacity=".7">their data, their logs</text><rect x="782" y="280" width="174" height="50" rx="10" fill="#222F30" stroke="rgba(231,232,225,.3)" stroke-width="1.4"/><text x="869.0" y="301" text-anchor="middle" font-weight="600" font-size="13">Machine role</text><text x="869.0" y="318" text-anchor="middle" font-size="11.5" fill-opacity=".7">named on the builder's keys</text><g fill="none" stroke="#CEF79F" stroke-width="1.6"><path d="M320 157 H450 V181 H780" marker-end="url(#la)"/><path d="M320 227 H470 V200 H780" marker-end="url(#la)" stroke-dasharray="5 4"/><path d="M780 305 H770" /><path d="M869 330 V366 H440 V297 H322" marker-end="url(#la)"/></g><g font-size="11.5" text-anchor="middle"><text x="450" y="148">1. the AMI is shared</text><text x="450" y="162" dy="0" opacity="0"> </text><text x="395" y="246">2. read on that</text><text x="395" y="260">release folder only</text><text x="440" y="384" opacity="0"> </text><text x="450" y="118" fill-opacity=".8">onboarding:</text><text x="450" y="134" fill-opacity="0"> </text><text x="640" y="382" fill-opacity=".9">3. the role asks for the key with proof of what it booted; the keys never leave KMS</text></g></g></svg></div><p class="hint" style="margin:0">Lime lines: what crosses from the builder to the customer. The model's key never crosses; it is released into the sealed machine's memory for one boot.</p></div><div class="act"><div class="row"><div class="txt"><p class="overline">A</p><h3>The builder makes a release</h3></div><span class="pill">Builder tab: Ship a model</span></div><ul class="plain"><li>The release agent encrypts the model and puts the files in the builder's S3 bucket, one folder per release.</li><li>The build machine builds the sealed image from the recipe, with the fingerprints of those files inside, and signs it.</li><li>The image is registered as an AMI in the builder's account. Both keys are tied to that image's measurements.</li></ul></div><div class="act"><div class="row"><div class="txt"><p class="overline">B</p><h3>The builder onboards a customer</h3></div><span class="pill">Customers tab: Onboard a new customer</span></div><ul class="plain"><li>The AMI is shared with the customer's AWS account. It is not copied, and it holds no model and no key.</li><li>The customer's machine role may read that one release folder in the builder's bucket. The files are ciphertext.</li><li>The keys are never shared. The key policies name the customer's machine role, and still require the image's measurements.</li><li>An install kit is written: image ID, key ARNs, bucket name, settings.</li></ul></div><div class="act"><div class="row"><div class="txt"><p class="overline">C</p><h3>The customer configures their AWS account</h3></div><span class="pill">Customer side tab: Configure this AWS account</span></div><ul class="plain"><li>A small private bucket for the agent's own files.</li><li>The customer agent and the remediation agent on AgentCore, in the customer's own account.</li><li>Once per account.</li></ul></div><div class="act"><div class="row"><div class="txt"><p class="overline">D</p><h3>The customer brings it up</h3></div><span class="pill">Customer side tab: Bring up the customer's side</span></div><ul class="plain"><li>The customer agent creates ONE stack. It holds everything the runtime needs:</li><li>a private network with no internet and three private doors (S3, KMS, logs); the customer's own bucket, key and log group; the machine's role; the sealed machine, started from the shared AMI; a load balancer, which is the endpoint.</li><li>The agent then makes an API key and tests the endpoint.</li></ul></div><div class="act"><div class="row"><div class="txt"><p class="overline">E</p><h3>Every boot, by itself</h3></div><span class="pill">nothing to press</span></div><ul class="plain"><li>The machine proves to KMS what it booted, gets the model's key once, locks itself, and streams the encrypted model to the GPU.</li><li>Logs, adapters and usage records stay in the customer's account. The builder may read usage counts only.</li></ul></div><div class="act"><div class="row"><div class="txt"><p class="overline">F</p><h3>Running, and the end</h3></div><span class="pill">Customers tab, per customer</span></div><ul class="plain"><li>The customer calls the endpoint and fine-tunes with their own data.</li><li>The builder can pause, resume or remove one customer. A paused customer's machine stops within about four minutes.</li><li>A new release: Ship a model again; every customer's machine loads it at its next restart.</li></ul></div></template>
 <script>
 const TOKEN = "__TOKEN__", ACTIONS = __ACTIONS__;
 const $ = id => document.getElementById(id);
-const FIELDS = {model: ["Model: owner/name on Hugging Face, a folder, or s3://", "Qwen/Qwen2.5-1.5B-Instruct"], data: ["Data file (full path, .jsonl)", ""], steps: ["Training steps", "150"]};
-let side = "builder", asking = null, since = 0, lines = [], lastId = null, running = false;
+const CYCLE = [["Builder", "Onboard the customer", "Register them by AWS account number, give access on the keys, share the release, write the install kit. This tab."],
+  ["Customer", "Configure their AWS account", "Once, with the kit: the agents on AgentCore in their own account. Customer side tab."],
+  ["Customer", "Bring up", "One stack, the sealed machine proves itself and loads the model, API key, test. Customer side tab."],
+  ["Both", "Run", "The customer calls the endpoint and fine-tunes; the builder reads usage counts."],
+  ["Builder", "Pause, resume, remove", "One customer at a time, from the list below."]];
+const FIELDS = {kit: ["Kit folder from the builder (leave empty to refresh the agents only)", ""], account: ["Their AWS account number (12 digits)", ""], name: ["Name", ""], role: ["Machine role ARN", ""], version: ["Version", ""], model: ["Model: owner/name on Hugging Face, a folder, or s3://", "Qwen/Qwen2.5-1.5B-Instruct"], data: ["Data file (full path, .jsonl)", ""], steps: ["Training steps", "150"]};
+let stack = "__STACK__", side = "life", asking = null, since = 0, lines = [], lastId = null, running = false;
 
 function el(tag, attrs, ...kids) {
   const n = document.createElement(tag);
@@ -125,8 +155,79 @@ function api(path, body) {
   return fetch(path, {method: body ? "POST" : "GET", headers: {"X-SMH-Token": TOKEN, "Content-Type": "application/json"}, body: body ? JSON.stringify(body) : undefined}).then(r => r.json());
 }
 
+// The builder's books: one row per customer or per release, with that row's own buttons.
+function rowButton(label, action, inputs, confirmText, primary) {
+  const b = el("button", {className: "btn", type: "button", text: label, disabled: running});
+  b.onclick = () => {
+    if (!confirmText) return run(action, inputs);
+    const cell = b.parentNode, yes = el("button", {className: "btn primary", type: "button", text: "Yes"}), no = el("button", {className: "btn", type: "button", text: "Cancel"});
+    yes.onclick = () => run(action, inputs); no.onclick = drawList;
+    cell.replaceChildren(el("span", {text: confirmText + " ", className: "small"}), no, yes);
+  };
+  return b;
+}
+function drawTable(kind) {
+  const list = $("list");
+  list.replaceChildren(el("p", {className: "hint", text: "Reading the builder's records"}));
+  api("/api/" + kind).then(r => {
+    if (side !== kind) return;
+    list.replaceChildren();
+    if (r.error) list.append(el("p", {className: "err", text: r.error}));
+    const table = el("table"), head = el("tr");
+    if (kind === "customers") {
+      const cycle = el("ol", {className: "cycle"});
+      CYCLE.forEach(([who, what, how]) => cycle.append(el("li", {}, el("span", {className: "pill", text: who}), el("b", {text: what}), el("p", {text: how}))));
+      const oname = el("input", {type: "text", placeholder: "acme", autocomplete: "off", spellcheck: false}), oacct = el("input", {type: "text", placeholder: "111122223333", autocomplete: "off", spellcheck: false, inputMode: "numeric"});
+      const onb = el("button", {className: "btn primary", type: "button", text: "Onboard", disabled: running});
+      onb.onclick = () => run("onboard_customer", {name: oname.value.trim(), account: oacct.value.trim()});
+      list.append(el("div", {className: "act"}, el("h3", {text: "The full cycle for one customer"}), cycle),
+        el("div", {className: "act"}, el("h3", {text: "Onboard a new customer"}),
+          el("p", {text: "You need only a short name and their AWS account number. Their machine role is known in advance, so access and the release are ready before they install anything. It ends with a kit folder to send them."}),
+          el("div", {className: "fields"}, el("label", {text: "Short name"}, oname), el("label", {text: "Their AWS account number"}, oacct)), el("div", {}, onb)));
+      list.append(el("p", {className: "hint", text: "Each customer is managed alone. Pausing one stops that customer's sealed machine within about four minutes; the others never notice."}));
+      ["Customer", "State", "Account", "Since", ""].forEach(t => head.append(el("th", {text: t})));
+      table.append(head);
+      r.rows.forEach(c => {
+        const acts = el("td", {className: "acts"});
+        if (c.state === "active") acts.append(rowButton("Pause", "customer_pause", {name: c.name}, "Stop " + c.name + "?"));
+        else acts.append(rowButton("Resume", "customer_resume", {name: c.name}));
+        acts.append(rowButton("Kit", "kit", {name: c.name}));
+        acts.append(rowButton("Remove", "customer_remove", {name: c.name}, "Remove " + c.name + " for good?"));
+        const state = el("td", {className: "small"}, el("span", {className: "dot" + (c.state === "active" ? " on" : "")}), c.state);
+        table.append(el("tr", {}, el("td", {}, el("b", {text: c.name}), el("div", {className: "small", text: c.role})), state, el("td", {className: "small", text: c.account}), el("td", {className: "small", text: c.added}), acts));
+      });
+      if (!r.rows.length) table.append(el("tr", {}, el("td", {colSpan: 5, className: "small", text: "No customers yet."})));
+      const name = el("input", {type: "text", placeholder: "acme", autocomplete: "off", spellcheck: false}), role = el("input", {type: "text", placeholder: "arn:aws:iam::111122223333:role/zl/acme-sealed-role", autocomplete: "off", spellcheck: false});
+      const add = el("button", {className: "btn", type: "button", text: "Add customer", disabled: running});
+      add.onclick = () => run("customer_add", {name: name.value, role: role.value});
+      list.append(el("div", {className: "tablewrap"}, table), el("div", {className: "act"}, el("h3", {text: "Add by machine role instead"}),
+        el("p", {text: "Only when a customer's machine role has another name than the kit gives it: paste the role's ARN. The measurements stay required; the role alone gets nothing."}),
+        el("div", {className: "fields"}, el("label", {text: "Name"}, name), el("label", {text: "Machine role ARN"}, role)), el("div", {}, add)));
+    } else {
+      list.append(el("p", {className: "hint", text: "One release is live at a time: the keys are tied to its image, and every customer runs it. Ship a new model from the Builder tab."}));
+      ["Release", "Model", "State", "Machine", ""].forEach(t => head.append(el("th", {text: t})));
+      table.append(head);
+      r.rows.forEach(m => {
+        const acts = el("td", {className: "acts"});
+        if (m.state === "available") acts.append(rowButton("Make live", "live", {version: m.version}, "Tie the keys to " + m.version + "?"));
+        const state = el("td", {className: "small"}, el("span", {className: "dot" + (m.state === "live" ? " on" : "")}), m.state);
+        table.append(el("tr", {}, el("td", {}, el("b", {text: m.version}), el("div", {className: "small", text: m.image})), el("td", {className: "small", text: m.model}), state, el("td", {className: "small", text: m.machine}), acts));
+      });
+      list.append(el("div", {className: "tablewrap"}, table));
+    }
+  });
+}
+
 function drawList() {
+  document.querySelector("main").className = (side === "customers" || side === "models" || side === "life") ? "wide" : "";
+  if (side === "life") return $("list").replaceChildren($("lifecycle").content.cloneNode(true));
+  if (side === "customers" || side === "models") return drawTable(side);
   const list = $("list"); list.replaceChildren();
+  if (side === "customer") {
+    const st = el("input", {type: "text", value: stack, autocomplete: "off", spellcheck: false});
+    st.oninput = () => { stack = st.value.trim(); };
+    list.append(el("div", {className: "act"}, el("h3", {text: "Which customer is this?"}), el("p", {text: "The name of this customer's stack, from the kit's settings file. Every button below acts on that one stack."}), el("div", {className: "fields"}, el("label", {text: "Stack"}, st))));
+  }
   for (const [key, a] of Object.entries(ACTIONS)) {
     if (a.side !== side || key === "status") continue;
     const card = el("div", {className: "act"});
@@ -140,7 +241,7 @@ function drawList() {
       a.inputs.forEach(f => { inputs[f] = el("input", {type: "text", value: FIELDS[f][1], autocomplete: "off", spellcheck: false}); fields.append(el("label", {text: FIELDS[f][0]}, inputs[f])); });
       card.append(fields);
     }
-    const start = () => run(key, Object.fromEntries(Object.entries(inputs).map(([k, i]) => [k, i.value])));
+    const start = () => run(key, Object.assign(side === "customer" ? {stack} : {}, Object.fromEntries(Object.entries(inputs).map(([k, i]) => [k, i.value]))));
     go.onclick = () => { if (a.confirm) { asking = key; drawList(); } else start(); };
     if (asking === key) {
       const yes = el("button", {className: "btn primary", type: "button", text: "Yes, start it", disabled: running});
@@ -201,7 +302,11 @@ function drawRun(job) {
 }
 
 function poll() {
-  api("/api/job?since=" + since).then(job => { drawTiles(job.status || {}); drawRun(job); }).catch(() => {}).finally(() => { clearTimeout(poll.t); poll.t = setTimeout(poll, running ? 2000 : 6000); });
+  api("/api/job?since=" + since).then(job => {
+    drawTiles(job.status || {}); drawRun(job);
+    $("outside").hidden = !job.outside;
+    if (job.outside) $("outside-what").textContent = "On this machine " + job.outside.name + " has been running for " + job.outside.minutes + " minutes, started from a terminal. It uses the keys and the machines, so buttons that change anything are refused until it finishes. Refresh status still works.";
+  }).catch(() => {}).finally(() => { clearTimeout(poll.t); poll.t = setTimeout(poll, running ? 2000 : 6000); });
 }
 
 document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {

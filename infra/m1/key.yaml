@@ -19,12 +19,14 @@ Parameters:
   Pcr12: {Type: String, Default: UNSET}
   # Runtime PCR ("door lock"). Empty = not pinned.
   Pcr15: {Type: String, Default: ""}
-  # M10: one onboarded customer's machine role (full ARN). Empty = nobody else.
-  CustomerRoleArn: {Type: String, Default: ""}
+  # The ACTIVE customers' machine roles (full ARNs, comma separated) and the accounts they are in. Empty = nobody else.
+  # Both come from the builder's registry (deployer/manage.py key-params); pausing one customer removes only that one.
+  CustomerRoleArn: {Type: CommaDelimitedList, Default: ""}
+  CustomerRoots: {Type: CommaDelimitedList, Default: ""}
 
 Conditions:
   PinRuntime: !Not [!Equals [!Ref Pcr15, ""]]
-  HasCustomer: !Not [!Equals [!Ref CustomerRoleArn, ""]]
+  HasCustomer: !Not [!Equals [!Join ["", !Ref CustomerRoleArn], ""]]
 
 Resources:
   ModelKey:
@@ -80,7 +82,7 @@ Resources:
             - HasCustomer
             - Sid: ReleaseToOnboardedCustomerRole
               Effect: Allow
-              Principal: {AWS: !Join ["", [!Select [0, !Split [":role/", !Ref CustomerRoleArn]], ":root"]]}
+              Principal: {AWS: !Ref CustomerRoots}
               Action: kms:Decrypt
               Resource: "*"
               Condition:

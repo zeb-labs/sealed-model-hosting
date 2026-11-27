@@ -60,7 +60,11 @@ if [ "$WHICH" = "key" ] || [ "$WHICH" = "lease" ]; then
   [ -n "${PCR4+x}" ] && PARAMS+=(Pcr4="$PCR4"); [ -n "${PCR7+x}" ] && PARAMS+=(Pcr7="$PCR7")
   [ "$WHICH" = "lease" ] && PARAMS+=(Alias=smh-poc-lease-key)
   [ -n "${PCR12+x}" ] && PARAMS+=(Pcr12="$PCR12"); [ -n "${PCR15+x}" ] && PARAMS+=(Pcr15="$PCR15")
-  [ -n "${CUSTOMER_ROLE+x}" ] && PARAMS+=(CustomerRoleArn="$CUSTOMER_ROLE")   # M10: onboard one customer's machine role ("" removes it)
+  # The active customers: their machine roles and their accounts, comma separated ("" = nobody). From deployer/manage.py key-params.
+  if [ -n "${CUSTOMER_ROLE+x}" ]; then
+    ROOTS="${CUSTOMER_ROOTS-$(printf '%s' "$CUSTOMER_ROLE" | tr ',' '\n' | sed -n 's|^\(arn:aws:iam::[0-9]*\):role/.*|\1:root|p' | sort -u | paste -sd, -)}"
+    PARAMS+=(CustomerRoleArn="$CUSTOMER_ROLE" CustomerRoots="$ROOTS")
+  fi
 fi
 
 # The six tags the SCP requires. Stack tags are copied onto every resource.

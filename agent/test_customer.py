@@ -11,7 +11,7 @@ class Fake:
         self.stacks, self.objects, self.created, self.deleted, self.secrets, self.power_calls = {}, {}, [], [], [], []
         self.reasons, self.console_text, self.state = "", "", "running"
         self.objects[("builder-bucket", "build/out-0.12.0/customer-install/install.json")] = json.dumps(
-            {"image": "ami-1", "model_key": "arn:k1", "lease_key": "arn:k2", "builder_bucket": "builder-bucket"}).encode()
+            {"image": "ami-1", "model_key": "arn:aws:kms:us-east-1:999900001111:key/k1", "lease_key": "arn:k2", "builder_bucket": "builder-bucket"}).encode()
         self.objects[("builder-bucket", "build/src/infra/m1/client-test.sh")] = b"curl TARGET -H APIKEY"
 
     def request(self, name="smh-poc-oc", **extra):
@@ -57,7 +57,8 @@ def test_install_takes_every_value_from_the_builders_package_and_the_persons_req
     a.request(Cidr="10.211.0.64/26", ExistingVpcId="vpc-1234567890abcdef0")
     assert c.call(a, "install", {"name": "smh-poc-oc", "machine_type": "g6.xlarge"})["stack"] == "creating"
     name, template, p = a.created[0]
-    assert (name, template, p["Ami"], p["ModelKeyArn"], p["InstanceType"], p["Cidr"]) == ("smh-poc-oc", "customer.yaml", "ami-1", "arn:k1", "g6.xlarge", "10.211.0.64/26")
+    assert (name, template, p["Ami"], p["InstanceType"], p["Cidr"]) == ("smh-poc-oc", "customer.yaml", "ami-1", "g6.xlarge", "10.211.0.64/26")
+    assert p["BuilderRoleArn"] == "arn:aws:iam::999900001111:role/zl/smh-poc-builder-role"       # the builder's account, not the customer's
     assert "already there" in c.call(a, "install", {"name": "smh-poc-oc", "machine_type": "g5.xlarge"})["refused"]
     b = Fake(); b.request(RolePath="/admin/")
     assert "not allowed" in c.call(b, "install", {"name": "smh-poc-oc", "machine_type": "g5.xlarge"})["refused"] and b.created == []

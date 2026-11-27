@@ -21,11 +21,15 @@ Parameters:
   # build inside an existing network that already has a KMS endpoint.
   ExistingVpcId: {Type: String, Default: "", Description: "Empty = create a new private network (the normal case)"}
   ExistingKmsEndpointSg: {Type: String, Default: "", Description: "With ExistingVpcId: the security group of that network's KMS endpoint"}
+  # TEST ONLY, for a SECOND customer inside one shared network: a network can hold one logs endpoint, and the first
+  # customer's stack has it. This customer's machine then serves normally, but its log lines do not reach its log group.
+  SkipLogsEndpoint: {Type: String, Default: "", AllowedValues: ["", "yes"], Description: "Leave empty. 'yes' only for a second test customer in a shared network"}
 
 Conditions:
   NewVpc: !Equals [!Ref ExistingVpcId, ""]
   OldVpc: !Not [!Equals [!Ref ExistingVpcId, ""]]
   HasSource: !Not [!Equals [!Ref ModelSource, ""]]
+  MakeLogsEndpoint: !Equals [!Ref SkipLogsEndpoint, ""]
 
 Resources:
   # ---------- private network: no internet gateway, no NAT ----------
@@ -78,6 +82,7 @@ Resources:
       SecurityGroupIds: [!Ref EndpointSg]
   LogsEndpoint:
     Type: AWS::EC2::VPCEndpoint
+    Condition: MakeLogsEndpoint
     Properties:
       VpcId: !If [NewVpc, !Ref Vpc, !Ref ExistingVpcId]
       ServiceName: !Sub "com.amazonaws.${AWS::Region}.logs"
@@ -90,6 +95,10 @@ Resources:
         Version: "2012-10-17"
         Statement:
           - {Effect: Allow, Principal: "*", Action: ["logs:CreateLogStream", "logs:PutLogEvents"], Resource: !GetAtt MachineLogs.Arn}
+
+  LogsReady:      # creates nothing: it lets the machine wait for the logs endpoint when there is one
+    Type: AWS::CloudFormation::WaitConditionHandle
+    Metadata: {After: !If [MakeLogsEndpoint, !Ref LogsEndpoint, "none"]}
 
   # ---------- the customer's own key, bucket and log group ----------
   MachineLogs:
@@ -215,7 +224,7 @@ Resources:
   # ---------- the sealed machine ----------
   Sealed:
     Type: AWS::EC2::Instance
-    DependsOn: [S3Endpoint, LogsEndpoint, CustomerBucketPolicy, SubnetRoutes]
+    DependsOn: [S3Endpoint, LogsReady, CustomerBucketPolicy, SubnetRoutes]
     Properties:
       ImageId: !Ref Ami
       InstanceType: !Ref InstanceType

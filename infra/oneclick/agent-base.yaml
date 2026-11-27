@@ -1,0 +1,16 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  smh-poc, in the CUSTOMER's account: one small private bucket for the customer
+  agent's own files (the two fixed templates, the builder's install package,
+  the install request). It never holds the model or a key. Tags come from the
+  stack tags.
+
+Resources:
+  AgentBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Sub smh-poc-artifacts-${AWS::AccountId}
+      PublicAccessBlockConfiguration: {BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration: [{ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}}]

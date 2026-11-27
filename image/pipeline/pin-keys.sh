@@ -22,7 +22,7 @@ PY
 pin() {   # pin <stack> <runtime value>: same template, same other settings, new measured values
   local out
   if out=$($A cloudformation update-stack --stack-name "$1" --use-previous-template --capabilities CAPABILITY_NAMED_IAM \
-      --parameters ParameterKey=AdminUserArn,UsePreviousValue=true ParameterKey=Alias,UsePreviousValue=true ParameterKey=CustomerRoleArn,UsePreviousValue=true \
+      --parameters ParameterKey=AdminUserArn,UsePreviousValue=true ParameterKey=Alias,UsePreviousValue=true ParameterKey=CustomerRoleArn,UsePreviousValue=true ParameterKey=CustomerRoots,UsePreviousValue=true \
         ParameterKey=Pcr4,ParameterValue="$PCR4" ParameterKey=Pcr7,ParameterValue="$PCR7" \
         ParameterKey=Pcr12,ParameterValue="$PCR12" ParameterKey=Pcr15,ParameterValue="$2" 2>&1); then
     $A cloudformation wait stack-update-complete --stack-name "$1"
