@@ -19,6 +19,7 @@ Parameters:
   VpcCidr: {Type: String}
   BalancerArn: {Type: String}
   BalancerDns: {Type: String}
+  CertificateHost: {Type: String, AllowedPattern: "[0-9]{1,3}(\\.[0-9]{1,3}){3}", Description: The sealed machine's private address (it is in the machine's certificate)}
   RolePath: {Type: String, Default: /zl/}
   LogsEndpointSg: {Type: String, Description: The security group of this network's logs endpoint}
 
@@ -96,7 +97,10 @@ Resources:
         IntegrationHttpMethod: ANY
         ConnectionType: VPC_LINK
         ConnectionId: !Ref Link
-        Uri: "https://sealed-model.smh.internal/{proxy}"      # for a private link this is only the NAME the gateway expects in the certificate; the traffic goes through the link
+        # For a private link the host here is only what the gateway expects to find in the sealed machine's certificate;
+        # the traffic itself goes through the link to the load balancer. The certificate lists the machine's own
+        # address, and API Gateway accepts an address where it refuses a made-up name.
+        Uri: !Sub "https://${CertificateHost}/{proxy}"
         RequestParameters: {integration.request.path.proxy: method.request.path.proxy}
         TimeoutInMillis: 29000
   Deployed:

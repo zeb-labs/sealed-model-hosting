@@ -616,10 +616,24 @@ The agent's code is one file, `consume/main.py`. It is a starting point: replace
 the two demonstration tools with your own.
 
 **A harness instead of code** (`consume/harness.py`) is a second form of way 2:
-an AgentCore harness whose model setting points at the sealed endpoint. It
-needs extra private endpoints, and must not share the sealed machine's network
-(the release check S7 refuses a network that can reach more than storage, the
-key service and logs). See `docs/m13-plan.md` for what was run.
+an AgentCore harness whose model setting points at the sealed endpoint through
+a private API Gateway in your network. Run on 28 Nov: it answered with the
+sealed model.
+
+    python consume/harness.py up <your stack>        about 25 minutes
+    python consume/harness.py ask <your stack> "<question>"
+    python consume/harness.py remove <your stack>
+
+Know before you use it:
+
+- The gateway does not check who signed the sealed machine's certificate (it
+  is self-signed). The hop stays inside your private network. A certificate
+  from a public authority removes both the gateway and this limit.
+- It needs six extra private endpoints. Do not leave them in the sealed
+  machine's network: the release check S7 refuses a network that can reach
+  more than storage, the key service and logs. Give the harness its own network.
+- After the sealed machine is replaced its address changes: run `up` again.
+- Tool use through the harness was not tried. It is not in `smh.sh` or the page.
 
 ## 6. Using the endpoint from your own app
 

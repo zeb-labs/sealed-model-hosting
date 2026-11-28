@@ -8,7 +8,9 @@
 the sealed endpoint (a harness trusts only public certificates; the sealed machine's is self-signed), the private
 doors a harness needs to start, a role and a security group. It then stores the customer's API key in AgentCore
 Identity and creates the harness with  model = the sealed endpoint  and  network = this private network.
-smh.sh calls this (harness-up, harness-ask, harness-remove).
+Run on 28 Nov (docs/m13-plan.md, C6). Not wired into smh.sh.
+shortcut: the gateway does not check who signed the sealed machine's certificate; give the endpoint a public certificate
+and point apiBase straight at it when a real domain exists.
 """
 import json
 import os
@@ -52,8 +54,9 @@ def up(session, stack):
     with open(os.path.join(HERE, "..", "infra", "oneclick", "consume-harness.yaml")) as f:
         template = f.read()
     logs_sg = ec2.describe_vpc_endpoints(Filters=[{"Name": "vpc-id", "Values": [o["VpcId"]]}, {"Name": "service-name", "Values": [f"com.amazonaws.{REGION}.logs"]}])["VpcEndpoints"][0]["Groups"][0]["GroupId"]
+    address = ec2.describe_instances(InstanceIds=[o["InstanceId"]])["Reservations"][0]["Instances"][0]["PrivateIpAddress"]
     params = {"Name": stack, "VpcId": o["VpcId"], "SubnetId": o["SubnetId"], "VpcCidr": cidr, "BalancerArn": balancer["LoadBalancerArn"], "BalancerDns": host,
-              "LogsEndpointSg": logs_sg}
+              "LogsEndpointSg": logs_sg, "CertificateHost": address}
     kwargs = dict(StackName=stack + "-harness", TemplateBody=template, Capabilities=["CAPABILITY_NAMED_IAM"],
                   Parameters=[{"ParameterKey": k, "ParameterValue": v} for k, v in params.items()], Tags=[{"Key": k, "Value": v} for k, v in TAGS.items()])
     try:
@@ -71,6 +74,16 @@ def up(session, stack):
     gw.update_integration(restApiId=api_id, resourceId=resource, httpMethod="ANY",
                           patchOperations=[{"op": "replace", "path": "/tlsConfig/insecureSkipVerification", "value": "true"}])
     gw.create_deployment(restApiId=api_id, stageName="sealed")
+    # Before waiting 20 minutes for a harness: does the gateway reach the sealed machine at all?
+    for _ in range(20):                 # a new private link needs a few minutes before the gateway can use it
+        probe = gw.test_invoke_method(restApiId=api_id, resourceId=resource, httpMethod="GET", pathWithQueryString="/health")
+        if probe["status"] == 200:
+            break
+        time.sleep(30)
+    if probe["status"] != 200:
+        why = [line for line in probe.get("log", "").splitlines() if "failed" in line.lower() or "error" in line.lower()]
+        sys.exit(f"the private gateway cannot reach the sealed machine (status {probe['status']}): {(why or ['no reason given'])[-1][-260:]}")
+    print("the private gateway reaches the sealed machine (health 200)")
     harness_name, provider = names(stack)
     # The customer's API key goes into AgentCore Identity. It is read from the customer's bucket and never printed.
     key = s3.get_object(Bucket=o["Bucket"], Key="gate/api-keys.txt")["Body"].read().decode().split()[0]
@@ -84,7 +97,8 @@ def up(session, stack):
     del key
     spec = dict(
         executionRoleArn=h["RoleArn"],
-        model={"openAiModelConfig": {"modelId": os.environ.get("SMH_MODEL", "demo"), "apiKeyArn": arn, "apiBase": h["ApiBase"], "maxTokens": 400}},
+        model={"openAiModelConfig": {"modelId": os.environ.get("SMH_MODEL", "demo"), "apiKeyArn": arn, "apiBase": h["ApiBase"], "maxTokens": 400,
+                                     "apiFormat": "chat_completions"}},      # the sealed machine's gate allows the chat address, not "responses"
         systemPrompt=[{"text": PROMPT}],
         environment={"agentCoreRuntimeEnvironment": {"networkConfiguration": {"networkMode": "VPC", "networkModeConfig": {
             "subnets": [o["SubnetId"]], "securityGroups": [h["SecurityGroup"]]}}}},
@@ -142,12 +156,15 @@ def remove(session, stack):
         control.delete_api_key_credential_provider(name=provider)
     except Exception:
         pass
-    try:
-        cf.delete_stack(StackName=stack + "-harness")
-        cf.get_waiter("stack_delete_complete").wait(StackName=stack + "-harness", WaiterConfig={"Delay": 15, "MaxAttempts": 80})
-        print("the private gateway and the harness's doors are removed")
-    except Exception as error:
-        print("the harness stack is not gone yet:", str(error)[:160])
+    for attempt in (1, 2):              # the first try fails: the gateway's deployed copy still names the private link (28 Nov)
+        try:
+            cf.delete_stack(StackName=stack + "-harness")
+            cf.get_waiter("stack_delete_complete").wait(StackName=stack + "-harness", WaiterConfig={"Delay": 15, "MaxAttempts": 80})
+            print("the private gateway and the harness's doors are removed")
+            break
+        except Exception as error:
+            if attempt == 2:
+                sys.exit("the harness stack is not gone: " + str(error)[:160])
     path = os.path.join(HERE, f".harness-{stack}")
     if os.path.exists(path):
         os.remove(path)
