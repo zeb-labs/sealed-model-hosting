@@ -164,7 +164,7 @@ footer{padding-block:26px 34px;font-size:13px;color:var(--d-muted);border-top:1p
     <p class="overline">Secure model hosting - proof of concept</p>
     <h1>A model the customer can run but never read</h1>
     <p class="lede">A model builder ships its model into a customer's own AWS account. The customer's data never leaves that account, and the customer still cannot read or copy the model's weights. This page shows how that works, first in one picture, then step by step.</p>
-    <div class="chips"><span class="chip">Built on AWS NitroTPM attestation and KMS</span><span class="chip">Unmodified vLLM on one GPU</span><span class="chip">Run by three agents on AWS AgentCore</span><span class="chip">Usable through AgentCore, with tools</span><span class="chip">Attack suite on release 0.10.0</span></div>
+    <div class="chips"><span class="chip">Built on AWS NitroTPM attestation and KMS</span><span class="chip">Unmodified vLLM on one GPU</span><span class="chip">Run by three agents on AWS AgentCore</span><span class="chip">Usable through AgentCore, with tools</span><span class="chip">32 of 33 attack-suite tests on release 0.13.1</span></div>
   </div>
 </div>
 
@@ -544,7 +544,7 @@ footer{padding-block:26px 34px;font-size:13px;color:var(--d-muted);border-top:1p
       <h2>What we ran, and what we did not show</h2>
     </div>
     <div class="stats">
-      <div class="stat"><b>32 of 33</b><span>attack-suite tests pass on release 0.10.0; the other is the known open one</span></div>
+      <div class="stat"><b>32 of 33</b><span>attack-suite tests pass on the current release, 0.13.1; the other is the known open one (a reproducible build)</span></div>
       <div class="stat"><b>80 to 120 s</b><span>from keys disabled to answers stopped</span></div>
       <div class="stat"><b>80 s</b><span>to fine-tune a small adapter while serving</span></div>
       <div class="stat"><b>about 5 min</b><span>from pausing one customer to its machine switching off; the others keep serving</span></div>

@@ -20,14 +20,15 @@ below says plainly what was run and what was not.
 4. KMS releases the key only for that exact image, once per boot. Then the machine locks itself.
 5. The builder can switch a customer off at any time. The machine stops within about two minutes.
 
-## Where it stands (24 November 2026)
+## Where it stands (28 November 2026)
 
 | What | Result |
 | --- | --- |
-| Attack suite | 32 of 33 tests pass on release 0.10.0. The one left is a known open item (reproducible build). The current release, 0.10.1, is the same code built again; the full suite has not run on it. |
+| Attack suite | 32 of 33 tests pass on the current release, 0.13.1 (28 November). The one left is a known open item (reproducible build). |
 | One-click customer setup | Eight tests pass: one stack brings up a working, separate customer. |
 | Cut-off | Answers stop 80 to 120 seconds after the keys are disabled. |
-| Spend so far | About 70 USD of a 500 USD limit. |
+| Using the model | Two ways: direct inference for your own applications, or an agent on AWS AgentCore Runtime whose model is the sealed model, with tool use. Both run. |
+| Spend so far | About 92 USD of a 500 USD limit. |
 
 **27 November:** the remediation agent now runs on AWS AgentCore next to the release agent, and `bash smh.sh setup` sets up the builder's side with one command (`docs/m12-plan.md`), and `bash smh.sh up` is carried out by a customer agent on AgentCore. Release 0.12.0 was made and served with them; the full suite has not run on it.
 

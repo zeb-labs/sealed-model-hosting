@@ -37,7 +37,7 @@ Everything below is around that core.
 | 11 | No way to stop a running machine; one key for everyone | A lease the machine renews every minute. Disable the key and it stops within about two minutes. One customer can be cut off alone. | Run |
 | 12 | Measurements pasted into the key policy by hand on every rebuild | The pipeline computes them and writes both key policies, after an approval tied to that exact build | Run |
 | 13 | Setup is 11 manual steps across two accounts | Two commands: `bash smh.sh ship` (builder) and `bash smh.sh up` (customer), each watched by an AI agent that fixes or explains failures | Run |
-| 14 | Nothing tests the finished image | A suite of 33 tests, including 8 attacks, judged from raw evidence. 32 pass on release 0.10.0. | Run |
+| 14 | Nothing tests the finished image | A suite of 33 tests, including 8 attacks, judged from raw evidence. 32 pass on the current release, 0.13.1 (28 Nov); the other one is the reproducible build, not done. | Run |
 | 15 | The customer's machine role has broad read rights and full S3 access | A role with only what the machine needs; no KMS right of its own | Run |
 | 16 | The model's container can open connections out | A firewall set at boot: the container reaches the local proxy and nothing else | Run |
 
